@@ -15,9 +15,9 @@ let iconBgAlpha: CGFloat = 0.35
 let menuBarH: CGFloat = 7
 let menuBarCorner: CGFloat = 2.5
 
-let colorUnder: (CGFloat, CGFloat, CGFloat, CGFloat) = (0.25, 0.85, 0.35, 1.0)
-let colorOn:    (CGFloat, CGFloat, CGFloat, CGFloat) = (0.95, 0.85, 0.25, 1.0)
-let colorOver:  (CGFloat, CGFloat, CGFloat, CGFloat) = (1.0,  0.45, 0.10, 1.0)
+let colorNormal: (CGFloat, CGFloat, CGFloat, CGFloat) = (0.25, 0.85, 0.35, 1.0)  // green
+let colorWarn:   (CGFloat, CGFloat, CGFloat, CGFloat) = (1.0,  0.45, 0.10, 1.0)  // orange (≥90%)
+let colorCrit:   (CGFloat, CGFloat, CGFloat, CGFloat) = (1.0,  0.25, 0.20, 1.0)  // red (100%)
 
 // MARK: - Color logic
 
@@ -31,19 +31,14 @@ private func lerp(_ c1: (CGFloat, CGFloat, CGFloat, CGFloat),
             c1.3 + (c2.3 - c1.3) * t)
 }
 
-func paceColor(usageFrac: Double, timeFrac: Double) -> NSColor {
-    let effectiveTime = max(timeFrac, 0.15)
-    let ratio = effectiveTime > 0 ? usageFrac / effectiveTime : 0
-
+func usageColor(usageFrac: Double) -> NSColor {
     let c: (CGFloat, CGFloat, CGFloat, CGFloat)
-    if ratio < 0.7 {
-        c = colorUnder
-    } else if ratio < 1.0 {
-        c = lerp(colorUnder, colorOn, (ratio - 0.7) / 0.3)
-    } else if ratio < 1.5 {
-        c = lerp(colorOn, colorOver, (ratio - 1.0) / 0.5)
+    if usageFrac >= 1.0 {
+        c = colorCrit
+    } else if usageFrac >= 0.9 {
+        c = lerp(colorWarn, colorCrit, (usageFrac - 0.9) / 0.1)
     } else {
-        c = colorOver
+        c = colorNormal
     }
     return NSColor(red: c.0, green: c.1, blue: c.2, alpha: c.3)
 }
@@ -67,7 +62,7 @@ func drawBar(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat,
     if fw > 0 {
         ctx.saveGraphicsState()
         trackPath.setClip()
-        paceColor(usageFrac: fillFrac, timeFrac: tickFrac).setFill()
+        usageColor(usageFrac: fillFrac).setFill()
         NSRect(x: x, y: y, width: fw, height: h).fill()
         ctx.restoreGraphicsState()
     }
