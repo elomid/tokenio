@@ -261,10 +261,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func aboutClicked() {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
         NSApp.orderFrontStandardAboutPanel(options: [
-            .applicationVersion: "Version \(version) (\(build))",
             .credits: NSAttributedString(
                 string: "github.com/elomid/tokenio",
                 attributes: [
