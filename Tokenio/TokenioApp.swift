@@ -1,15 +1,16 @@
-import SwiftUI
 import AppKit
+import ServiceManagement
 
 @main
-struct TokenioApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    var body: some Scene {
-        Settings { EmptyView() }
-    }
-}
-
 class AppDelegate: NSObject, NSApplicationDelegate {
+
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        app.run()
+    }
+
     private var statusItem: NSStatusItem!
     private var sessionView: MetricMenuView!
     private var weeklyView: MetricMenuView!
@@ -26,7 +27,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var loading = false
     private var loginPrompted = false
     private var loginWindow: LoginWindow?
-    private var activityToken: NSObjectProtocol?
 
     // Last known icon values for redraw on appearance change
     private var lastSU: Double = 0, lastST: Double = 0
@@ -36,12 +36,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-
-        // Prevent App Nap
-        activityToken = ProcessInfo.processInfo.beginActivity(
-            options: [.idleSystemSleepDisabled],
-            reason: "Usage refresh timers"
-        )
 
         // Enable launch at login on first run
         if !UserDefaults.standard.bool(forKey: "hasLaunched") {
@@ -54,7 +48,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         applyIcon(makeIcon(sUsage: 0, sTime: 0, wUsage: 0, wTime: 0, isDark: isDarkMenuBar))
         buildMenu()
 
-        // Initial fetch
         let session = loadSession()
         let token = loadOAuthToken()
         if session == nil && token == nil {
@@ -66,9 +59,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         fetchTimer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
             self?.triggerFetch()
         }
+        RunLoop.main.add(fetchTimer!, forMode: .common)
+
         uiTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
             self?.updateRelativeTime()
         }
+        RunLoop.main.add(uiTimer!, forMode: .common)
+
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(refreshClicked),
+            name: NSWorkspace.didWakeNotification, object: nil
+        )
     }
 
     // MARK: - Menu
@@ -93,9 +94,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         addMetric(sonnetView)
         addMetric(extraView)
 
-        menu.addItem(.separator())
-
-        updatedItem = NSMenuItem(title: "↻  Refreshing…", action: #selector(refreshClicked), keyEquivalent: "")
+        updatedItem = NSMenuItem(title: "Refreshing…  ↻", action: #selector(refreshClicked), keyEquivalent: "")
         updatedItem.target = self
         menu.addItem(updatedItem)
 
@@ -111,8 +110,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         updateAuthVisibility()
 
-        menu.addItem(.separator())
-
         launchAtLoginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         launchAtLoginItem.target = self
         launchAtLoginItem.state = LaunchAtLogin.isEnabled ? .on : .off
@@ -121,6 +118,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let aboutItem = NSMenuItem(title: "About Tokenio", action: #selector(aboutClicked), keyEquivalent: "")
         aboutItem.target = self
         menu.addItem(aboutItem)
+
+        menu.addItem(.separator())
 
         let quitItem = NSMenuItem(title: "Quit Tokenio", action: #selector(quitClicked), keyEquivalent: "q")
         quitItem.target = self
@@ -145,7 +144,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func triggerFetch() {
         guard !loading else { return }
         loading = true
-        updatedItem?.title = "↻  Refreshing…"
+        updatedItem?.title = "Refreshing…  ↻"
         DispatchQueue.global().async { [weak self] in
             let result = fetchUsage()
             DispatchQueue.main.async { self?.handleResult(result) }
@@ -192,11 +191,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             lastFetched = Date().timeIntervalSince1970
-            updatedItem.title = "↻  Updated just now"
+            updatedItem.title = "Updated just now  ↻"
             updateAuthVisibility()
 
         case .needsLogin:
-            updatedItem.title = "⚠  Session expired"
+            updatedItem.title = "Session expired  ⚠"
             updateAuthVisibility()
             if !loginPrompted {
                 loginPrompted = true
@@ -204,16 +203,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
         case .error(let msg):
-            updatedItem.title = "⚠  \(msg)"
+            let short = msg.count > 40 ? String(msg.prefix(40)) + "…" : msg
+            updatedItem.title = "\(short)  ⚠"
         }
     }
 
     // MARK: - Auth UI
 
     private func updateAuthVisibility() {
-        let hasSession = loadSession() != nil
-        loginItem.isHidden = hasSession
-        logoutItem.isHidden = !hasSession
+        let hasCredentials = loadSession() != nil || loadOAuthToken() != nil
+        loginItem.isHidden = hasCredentials
+        logoutItem.isHidden = loadSession() == nil
     }
 
     private func showLogin() {
@@ -233,7 +233,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateRelativeTime() {
         guard lastFetched > 0 else { return }
-        updatedItem.title = "↻  Updated \(fmtAgo(lastFetched))"
+        updatedItem.title = "Updated \(fmtAgo(lastFetched))  ↻"
         // Rebuild icon to track appearance changes (light/dark)
         applyIcon(makeIcon(sUsage: lastSU, sTime: lastST, wUsage: lastWU, wTime: lastWT, isDark: isDarkMenuBar))
     }
@@ -248,10 +248,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         clearSession()
         updateAuthVisibility()
         if loadOAuthToken() != nil {
-            updatedItem.title = "↻  Using Claude Code credentials"
+            updatedItem.title = "Using Claude Code credentials  ↻"
             triggerFetch()
         } else {
-            updatedItem.title = "⚠  Logged out"
+            updatedItem.title = "Logged out  ⚠"
         }
     }
 
@@ -284,8 +284,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 // MARK: - Launch at Login (SMAppService, macOS 13+)
-
-import ServiceManagement
 
 enum LaunchAtLogin {
     static var isEnabled: Bool {

@@ -19,7 +19,7 @@ class LoginWindow: NSObject, WKNavigationDelegate {
     private var window: NSWindow?
     private var webView: WKWebView?
     private var cookieTimer: Timer?
-    private var onSuccess: ((String, String) -> Void)?  // (sessionKey, orgId)
+    private var onSuccess: ((_ sessionKey: String, _ orgId: String) -> Void)?
     private var onCancel: (() -> Void)?
     private var validationRetries = 0
     private let maxValidationRetries = 5
@@ -91,7 +91,6 @@ class LoginWindow: NSObject, WKNavigationDelegate {
     }
 
     private func handleSessionKey(_ key: String) {
-        // Validate on background thread
         DispatchQueue.global().async { [weak self] in
             guard let orgId = validateAndGetOrg(sessionKey: key) else {
                 DispatchQueue.main.async {

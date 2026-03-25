@@ -19,31 +19,31 @@ The menu bar icon shows two small bars: the top bar is your current session usag
 
 Download the latest `.zip` from [Releases](https://github.com/elomid/tokenio/releases), unzip, and drag `Tokenio.app` to your Applications folder.
 
-Requires macOS 13 (Ventura) or later. Tokenio enables Launch at Login on first run — you can toggle this from the menu.
+Requires macOS 13 (Ventura) or later. Designed for Claude Pro and Max subscribers.
+
+Tokenio enables Launch at Login on first run — you can toggle this from the menu.
 
 ## Auth
 
 On first launch, Tokenio opens a sign-in window to log in to your Claude account. This works with any login method (Google, Apple, email, etc.).
 
-Your session is stored in the macOS Keychain. If you also use Claude Code CLI, Tokenio can use its existing credentials as a fallback — no login needed.
+Your session is stored in the macOS Keychain. If you also use Claude Code CLI, Tokenio can use its existing credentials as a fallback — no login needed. macOS will show a one-time prompt asking to allow Tokenio access to the Claude Code keychain item; this is expected.
 
 ## Build from source
 
 ```bash
 git clone https://github.com/elomid/tokenio.git
 cd tokenio
-xcodebuild -project Tokenio.xcodeproj -scheme Tokenio -configuration Release build
+xcodebuild -project Tokenio.xcodeproj -scheme Tokenio -configuration Release -derivedDataPath build build
 ```
 
-The built app will be in `~/Library/Developer/Xcode/DerivedData/Tokenio-*/Build/Products/Release/Tokenio.app`.
+The built app will be in `build/Build/Products/Release/Tokenio.app`.
 
 ## How it works
 
-Tokenio reads usage data from Claude's internal API using your session cookie — the same data you see on the [usage page](https://claude.ai/settings/usage). It refreshes every 5 minutes.
+Tokenio reads usage data from Claude's internal usage API — the same data shown on the [usage settings page](https://claude.ai/settings/usage). This API is undocumented and may change without notice. Data refreshes every 5 minutes.
 
 Usage data is only exchanged with `claude.ai` and `api.anthropic.com`. During login, your browser may connect to third-party auth providers (Google, Apple, Microsoft, GitHub) depending on your sign-in method.
-
-Tokenio uses Claude's internal usage API — the same data shown on the [usage settings page](https://claude.ai/settings/usage). This API is undocumented and may change without notice.
 
 ## Known limitations
 
