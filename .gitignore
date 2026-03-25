@@ -19,3 +19,9 @@ xcuserdata/
 # Swift Package Manager
 .build/
 Packages/
+
+# Build output
+build/
+
+# Secrets
+.env
