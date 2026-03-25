@@ -111,6 +111,25 @@ func loadOAuthToken() -> String? {
     return token
 }
 
+func isOAuthTokenExpired() -> Bool {
+    let query: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: "Claude Code-credentials",
+        kSecReturnData as String: true,
+        kSecMatchLimit as String: kSecMatchLimitOne,
+    ]
+    var item: CFTypeRef?
+    guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+          let data = item as? Data,
+          let creds = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let oauth = creds["claudeAiOauth"] as? [String: Any],
+          let _ = oauth["accessToken"] as? String,
+          let exp = oauth["expiresAt"] as? Double
+    else { return false }  // no credentials at all — not "expired"
+
+    return exp / 1000 < Date().timeIntervalSince1970
+}
+
 // MARK: - API
 
 private let browserHeaders: [String: String] = [
@@ -127,31 +146,73 @@ private let browserHeaders: [String: String] = [
     "sec-fetch-site": "same-origin",
 ]
 
-private func apiRequest(path: String, sessionKey: String) -> Any? {
-    guard let url = URL(string: "https://claude.ai\(path)") else { return nil }
+private enum ApiResult {
+    case success(Any)
+    case authFailure
+    case networkError(String)
+}
+
+private func apiRequest(path: String, sessionKey: String) -> ApiResult {
+    guard let url = URL(string: "https://claude.ai\(path)") else { return .networkError("Bad URL") }
     var req = URLRequest(url: url, timeoutInterval: 15)
     for (k, v) in browserHeaders { req.setValue(v, forHTTPHeaderField: k) }
     req.setValue("sessionKey=\(sessionKey)", forHTTPHeaderField: "Cookie")
 
-    var result: Any?
+    var result: ApiResult = .networkError("Request timed out")
     let sem = DispatchSemaphore(value: 0)
-    URLSession.shared.dataTask(with: req) { data, resp, _ in
+    URLSession.shared.dataTask(with: req) { data, resp, error in
         defer { sem.signal() }
-        guard let data, let http = resp as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return }
+        if let error {
+            result = .networkError(error.localizedDescription)
+            return
+        }
+        guard let http = resp as? HTTPURLResponse else {
+            result = .networkError("No response")
+            return
+        }
+        if http.statusCode == 401 || http.statusCode == 403 {
+            result = .authFailure
+            return
+        }
+        guard (200...299).contains(http.statusCode) else {
+            result = .networkError("HTTP \(http.statusCode)")
+            return
+        }
+        guard let data else {
+            result = .networkError("No data")
+            return
+        }
         if let prefix = String(data: data.prefix(5), encoding: .utf8),
-           prefix.hasPrefix("<!DOC") || prefix.hasPrefix("<html") { return }
-        result = try? JSONSerialization.jsonObject(with: data)
+           prefix.hasPrefix("<!DOC") || prefix.hasPrefix("<html") {
+            result = .authFailure  // redirected to login page
+            return
+        }
+        if let json = try? JSONSerialization.jsonObject(with: data) {
+            result = .success(json)
+        } else {
+            result = .networkError("Invalid JSON")
+        }
     }.resume()
     sem.wait()
     return result
 }
 
-private func apiRequestDict(path: String, sessionKey: String) -> [String: Any]? {
-    apiRequest(path: path, sessionKey: sessionKey) as? [String: Any]
+private func apiRequestDict(path: String, sessionKey: String) -> ApiResult {
+    let result = apiRequest(path: path, sessionKey: sessionKey)
+    switch result {
+    case .success(let json):
+        if let dict = json as? [String: Any] {
+            return .success(dict)
+        }
+        return .networkError("Unexpected response format")
+    default:
+        return result
+    }
 }
 
 func validateAndGetOrg(sessionKey: String) -> String? {
-    guard let arr = apiRequest(path: "/api/organizations", sessionKey: sessionKey) as? [[String: Any]],
+    guard case .success(let json) = apiRequest(path: "/api/organizations", sessionKey: sessionKey),
+          let arr = json as? [[String: Any]],
           let first = arr.first,
           let uuid = first["uuid"] as? String
     else { return nil }
@@ -188,31 +249,49 @@ private func nextMonthTs() -> TimeInterval {
     return cal.date(from: comps)?.timeIntervalSince1970 ?? 0
 }
 
-func fetchUsageSessionKey(session: Session) -> UsageData? {
+func fetchUsageSessionKey(session: Session) -> UsageResult {
     let group = DispatchGroup()
-    var usage: [String: Any]?
-    var overage: [String: Any]?
+    var usageResult: ApiResult = .networkError("Not started")
+    var overageResult: ApiResult = .networkError("Not started")
 
     group.enter()
     DispatchQueue.global().async {
-        usage = apiRequestDict(path: "/api/organizations/\(session.orgId)/usage", sessionKey: session.sessionKey)
+        usageResult = apiRequestDict(path: "/api/organizations/\(session.orgId)/usage", sessionKey: session.sessionKey)
         group.leave()
     }
 
     group.enter()
     DispatchQueue.global().async {
-        overage = apiRequestDict(path: "/api/organizations/\(session.orgId)/overage_spend_limit", sessionKey: session.sessionKey)
+        overageResult = apiRequestDict(path: "/api/organizations/\(session.orgId)/overage_spend_limit", sessionKey: session.sessionKey)
         group.leave()
     }
 
     group.wait()
 
-    guard let usage else { return nil }
+    // Check for auth failure on either request
+    if case .authFailure = usageResult { return .needsLogin }
+    if case .authFailure = overageResult { return .needsLogin }
 
-    let ov = overage ?? [:]
+    // Extract usage data — required
+    guard case .success(let usageJson) = usageResult,
+          let usage = usageJson as? [String: Any] else {
+        if case .networkError(let msg) = usageResult {
+            return .error("Network error: \(msg)")
+        }
+        return .error("Failed to fetch usage")
+    }
+
+    // Extract overage data — optional
+    let ov: [String: Any]
+    if case .success(let overageJson) = overageResult, let dict = overageJson as? [String: Any] {
+        ov = dict
+    } else {
+        ov = [:]
+    }
+
     let usedCents = (ov["used_credits"] as? Int) ?? 0
 
-    return UsageData(
+    return .success(UsageData(
         sessionPct: pct(usage["five_hour"] as? [String: Any]),
         sessionReset: rst(usage["five_hour"] as? [String: Any]),
         weeklyPct: pct(usage["seven_day"] as? [String: Any]),
@@ -223,7 +302,7 @@ func fetchUsageSessionKey(session: Session) -> UsageData? {
         overageReset: nextMonthTs(),
         extraDollars: Double(usedCents) / 100,
         extraEnabled: (ov["is_enabled"] as? Bool) ?? false
-    )
+    ))
 }
 
 func fetchUsageOAuth(token: String) -> UsageData? {
@@ -263,11 +342,16 @@ func fetchUsageOAuth(token: String) -> UsageData? {
 func fetchUsage() -> UsageResult {
     // Try sessionKey first
     if let session = loadSession() {
-        if let data = fetchUsageSessionKey(session: session) {
-            return .success(data)
+        let result = fetchUsageSessionKey(session: session)
+        switch result {
+        case .success:
+            return result
+        case .needsLogin:
+            clearSession()  // confirmed auth failure — clear stale session
+            break  // fall through to OAuth
+        case .error:
+            return result  // transient failure — keep session, report error
         }
-        clearSession()
-        return .needsLogin
     }
 
     // Fallback: Claude Code OAuth
@@ -276,6 +360,11 @@ func fetchUsage() -> UsageResult {
             return .success(data)
         }
         return .error("OAuth request failed")
+    }
+
+    // Check if OAuth token exists but is expired
+    if isOAuthTokenExpired() {
+        return .error("Claude Code token expired — relaunch Claude Code")
     }
 
     return .needsLogin

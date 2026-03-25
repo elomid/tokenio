@@ -11,7 +11,7 @@ Tiny macOS menu bar app that shows your Claude AI usage at a glance.
 - **Weekly — Sonnet only** (7-day window)
 - **Extra usage** — dollar amount and utilization
 
-Each bar is color-coded by pace: **green** = under pace, **yellow** = on pace, **orange** = over pace. The transparent notch shows where you are in the time window.
+Each bar is color-coded: **green** = normal, **orange** = near limit (≥90%), **red** = at limit. The transparent notch shows where you are in the time window.
 
 ## Install
 
@@ -39,7 +39,7 @@ The built app will be in `~/Library/Developer/Xcode/DerivedData/Tokenio-*/Build/
 
 Tokenio reads usage data from Claude's internal API using your session cookie — the same data you see on the [usage page](https://claude.ai/settings/usage). It refreshes every 5 minutes.
 
-No data is sent anywhere except to `claude.ai` for fetching your usage.
+No data is sent anywhere except to `claude.ai` (session auth) and `api.anthropic.com` (Claude Code OAuth fallback) for fetching your usage.
 
 ## License
 

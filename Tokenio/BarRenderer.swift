@@ -110,15 +110,15 @@ func drawBarMonochrome(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat,
 }
 
 func makeIcon(sUsage: Double, sTime: Double, wUsage: Double, wTime: Double) -> NSImage {
-    let img = NSImage(size: NSSize(width: iconW, height: iconH))
-    img.lockFocus()
-    drawBarMonochrome(x: barX0, y: sessionY, w: barW, h: barH,
-                      corner: barCorner, fillFrac: sUsage / 100, tickFrac: sTime / 100,
-                      bgAlpha: iconBgAlpha)
-    drawBarMonochrome(x: barX0, y: weeklyY, w: barW, h: barH,
-                      corner: barCorner, fillFrac: wUsage / 100, tickFrac: wTime / 100,
-                      bgAlpha: iconBgAlpha)
-    img.unlockFocus()
+    let img = NSImage(size: NSSize(width: iconW, height: iconH), flipped: false) { _ in
+        drawBarMonochrome(x: barX0, y: sessionY, w: barW, h: barH,
+                          corner: barCorner, fillFrac: sUsage / 100, tickFrac: sTime / 100,
+                          bgAlpha: iconBgAlpha)
+        drawBarMonochrome(x: barX0, y: weeklyY, w: barW, h: barH,
+                          corner: barCorner, fillFrac: wUsage / 100, tickFrac: wTime / 100,
+                          bgAlpha: iconBgAlpha)
+        return true
+    }
     img.isTemplate = false
     return img
 }

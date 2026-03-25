@@ -35,7 +35,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Prevent App Nap
         activityToken = ProcessInfo.processInfo.beginActivity(
-            options: [.userInitiated, .idleSystemSleepDisabled],
+            options: [.userInitiated],
             reason: "Usage refresh timers"
         )
 
@@ -162,7 +162,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
             let oU = d.overagePct
             let oR = d.overageReset
-            let oT = elapsedPct(resetTs: oR, windowSecs: 30 * 24 * 3600)
+            let daysInMonth = Double(Calendar.current.range(of: .day, in: .month, for: Date())?.count ?? 30)
+            let oT = elapsedPct(resetTs: oR, windowSecs: daysInMonth * 24 * 3600)
 
             sessionView.setData(value: "\(Int(sU))%", usageFrac: sU / 100, timeFrac: sT / 100, resetStr: "Resets in \(fmtReset(sR))")
             weeklyView.setData(value: "\(Int(wU))%", usageFrac: wU / 100, timeFrac: wT / 100, resetStr: "Resets in \(fmtReset(wR))")
@@ -193,8 +194,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateAuthVisibility() {
         let hasSession = loadSession() != nil
-        let hasAnyAuth = hasSession || loadOAuthToken() != nil
-        loginItem.isHidden = hasAnyAuth
+        loginItem.isHidden = hasSession
         logoutItem.isHidden = !hasSession
     }
 
@@ -227,7 +227,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func logoutClicked() {
         clearSession()
         updateAuthVisibility()
-        updatedItem.title = "⚠  Logged out"
+        if loadOAuthToken() != nil {
+            updatedItem.title = "↻  Using Claude Code credentials"
+            triggerFetch()
+        } else {
+            updatedItem.title = "⚠  Logged out"
+        }
     }
 
     @objc private func toggleLaunchAtLogin() {
