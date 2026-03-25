@@ -36,7 +36,7 @@ class MetricMenuView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let fTitle = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        let fTitle = NSFont.systemFont(ofSize: 13, weight: .medium)
         let fVal = NSFont.systemFont(ofSize: 13, weight: .regular)
         let fReset = NSFont.systemFont(ofSize: 11)
         let cLabel = NSColor.labelColor
