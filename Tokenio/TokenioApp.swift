@@ -28,6 +28,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var loginWindow: LoginWindow?
     private var activityToken: NSObjectProtocol?
 
+    // Last known icon values for redraw on appearance change
+    private var lastSU: Double = 0, lastST: Double = 0
+    private var lastWU: Double = 0, lastWT: Double = 0
+
     private let refreshInterval: TimeInterval = 300 // 5 min
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -35,18 +39,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Prevent App Nap
         activityToken = ProcessInfo.processInfo.beginActivity(
-            options: [.userInitiated],
+            options: [.idleSystemSleepDisabled],
             reason: "Usage refresh timers"
         )
 
         // Enable launch at login on first run
         if !UserDefaults.standard.bool(forKey: "hasLaunched") {
-            UserDefaults.standard.set(true, forKey: "hasLaunched")
-            if !LaunchAtLogin.isEnabled { LaunchAtLogin.toggle() }
+            if LaunchAtLogin.isEnabled || LaunchAtLogin.enable() {
+                UserDefaults.standard.set(true, forKey: "hasLaunched")
+            }
         }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        applyIcon(makeIcon(sUsage: 0, sTime: 0, wUsage: 0, wTime: 0))
+        applyIcon(makeIcon(sUsage: 0, sTime: 0, wUsage: 0, wTime: 0, isDark: isDarkMenuBar))
         buildMenu()
 
         // Initial fetch
@@ -61,7 +66,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         fetchTimer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
             self?.triggerFetch()
         }
-        uiTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+        uiTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
             self?.updateRelativeTime()
         }
     }
@@ -90,7 +95,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        updatedItem = NSMenuItem(title: "↻  Updated —", action: #selector(refreshClicked), keyEquivalent: "")
+        updatedItem = NSMenuItem(title: "↻  Refreshing…", action: #selector(refreshClicked), keyEquivalent: "")
         updatedItem.target = self
         menu.addItem(updatedItem)
 
@@ -113,6 +118,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         launchAtLoginItem.state = LaunchAtLogin.isEnabled ? .on : .off
         menu.addItem(launchAtLoginItem)
 
+        let aboutItem = NSMenuItem(title: "About Tokenio", action: #selector(aboutClicked), keyEquivalent: "")
+        aboutItem.target = self
+        menu.addItem(aboutItem)
+
         let quitItem = NSMenuItem(title: "Quit Tokenio", action: #selector(quitClicked), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
@@ -121,6 +130,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Icon
+
+    private var isDarkMenuBar: Bool {
+        statusItem.button?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    }
 
     private func applyIcon(_ img: NSImage) {
         statusItem.button?.image = img
@@ -132,6 +145,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func triggerFetch() {
         guard !loading else { return }
         loading = true
+        updatedItem?.title = "↻  Refreshing…"
         DispatchQueue.global().async { [weak self] in
             let result = fetchUsage()
             DispatchQueue.main.async { self?.handleResult(result) }
@@ -154,24 +168,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let wR = d.weeklyReset
             let wT = elapsedPct(resetTs: wR, windowSecs: 7 * 24 * 3600)
 
-            applyIcon(makeIcon(sUsage: sU, sTime: sT, wUsage: wU, wTime: wT))
+            lastSU = sU; lastST = sT; lastWU = wU; lastWT = wT
+            applyIcon(makeIcon(sUsage: sU, sTime: sT, wUsage: wU, wTime: wT, isDark: isDarkMenuBar))
 
             let snU = d.sonnetPct
             let snR = d.sonnetReset
             let snT = elapsedPct(resetTs: snR, windowSecs: 7 * 24 * 3600)
 
-            let oU = d.overagePct
-            let oR = d.overageReset
-            let daysInMonth = Double(Calendar.current.range(of: .day, in: .month, for: Date())?.count ?? 30)
-            let oT = elapsedPct(resetTs: oR, windowSecs: daysInMonth * 24 * 3600)
-
             sessionView.setData(value: "\(Int(sU))%", usageFrac: sU / 100, timeFrac: sT / 100, resetStr: "Resets in \(fmtReset(sR))")
             weeklyView.setData(value: "\(Int(wU))%", usageFrac: wU / 100, timeFrac: wT / 100, resetStr: "Resets in \(fmtReset(wR))")
             sonnetView.setData(value: "\(Int(snU))%", usageFrac: snU / 100, timeFrac: snT / 100, resetStr: "Resets in \(fmtReset(snR))")
 
-            let suffix = d.extraEnabled ? "$\(String(format: "%.2f", d.extraDollars))" : ""
-            extraView.setTitle("Extra usage", suffix: suffix)
-            extraView.setData(value: "\(Int(oU))%", usageFrac: oU / 100, timeFrac: oT / 100, resetStr: "Resets in \(fmtReset(oR))")
+            if d.extraEnabled {
+                let oU = d.overagePct
+                let oR = d.overageReset
+                let daysInMonth = Double(Calendar.current.range(of: .day, in: .month, for: Date())?.count ?? 30)
+                let oT = elapsedPct(resetTs: oR, windowSecs: daysInMonth * 24 * 3600)
+                extraView.setTitle("Extra usage", suffix: "$\(String(format: "%.2f", d.extraDollars))")
+                extraView.setData(value: "\(Int(oU))%", usageFrac: oU / 100, timeFrac: oT / 100, resetStr: "Resets in \(fmtReset(oR))")
+            } else {
+                extraView.setTitle("Extra usage")
+                extraView.setData(value: "Not enabled", usageFrac: 0, timeFrac: 0, resetStr: "")
+            }
 
             lastFetched = Date().timeIntervalSince1970
             updatedItem.title = "↻  Updated just now"
@@ -216,6 +234,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateRelativeTime() {
         guard lastFetched > 0 else { return }
         updatedItem.title = "↻  Updated \(fmtAgo(lastFetched))"
+        // Rebuild icon to track appearance changes (light/dark)
+        applyIcon(makeIcon(sUsage: lastSU, sTime: lastST, wUsage: lastWU, wTime: lastWT, isDark: isDarkMenuBar))
     }
 
     // MARK: - Actions
@@ -240,6 +260,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         launchAtLoginItem.state = LaunchAtLogin.isEnabled ? .on : .off
     }
 
+    @objc private func aboutClicked() {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .applicationVersion: "Version \(version) (\(build))",
+            .credits: NSAttributedString(
+                string: "github.com/elomid/tokenio",
+                attributes: [
+                    .link: URL(string: "https://github.com/elomid/tokenio")!,
+                    .font: NSFont.systemFont(ofSize: 11),
+                ]
+            ),
+        ])
+        if #available(macOS 14.0, *) {
+            NSApp.activate()
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
     @objc private func quitClicked() { NSApp.terminate(nil) }
 }
 
@@ -252,6 +292,17 @@ enum LaunchAtLogin {
         SMAppService.mainApp.status == .enabled
     }
 
+    @discardableResult
+    static func enable() -> Bool {
+        do {
+            try SMAppService.mainApp.register()
+            return true
+        } catch {
+            log.error("LaunchAtLogin register failed: \(error.localizedDescription)")
+            return false
+        }
+    }
+
     static func toggle() {
         do {
             if isEnabled {
@@ -260,7 +311,7 @@ enum LaunchAtLogin {
                 try SMAppService.mainApp.register()
             }
         } catch {
-            // silently fail
+            log.error("LaunchAtLogin toggle failed: \(error.localizedDescription)")
         }
     }
 }

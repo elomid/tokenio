@@ -71,6 +71,7 @@ rm -f "$BUILD_DIR/$SCHEME-notarize.zip"
 # Package
 echo "Packaging..."
 ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
+shasum -a 256 "$ZIP_PATH" | tee "$BUILD_DIR/$SCHEME-$VERSION.sha256"
 echo "Created: $ZIP_PATH ($(du -h "$ZIP_PATH" | cut -f1))"
 
 # GitHub release
@@ -83,6 +84,6 @@ if [[ $REPLY =~ ^[Yy]$ ]]; then
     gh release create "v$VERSION" \
         --title "Tokenio $VERSION" \
         --generate-notes \
-        "$ZIP_PATH"
+        "$ZIP_PATH" "$BUILD_DIR/$SCHEME-$VERSION.sha256"
     echo "Released: https://github.com/elomid/tokenio/releases/tag/v$VERSION"
 fi

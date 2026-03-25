@@ -80,11 +80,12 @@ func drawBar(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat,
 
 func drawBarMonochrome(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat,
                        corner: CGFloat, fillFrac: Double, tickFrac: Double,
-                       bgAlpha: CGFloat) {
+                       bgAlpha: CGFloat, isDark: Bool) {
     let trackRect = NSRect(x: x, y: y, width: w, height: h)
     let trackPath = NSBezierPath(roundedRect: trackRect, xRadius: corner, yRadius: corner)
 
-    NSColor(white: 1.0, alpha: bgAlpha).setFill()
+    let baseWhite: CGFloat = isDark ? 1.0 : 0.0
+    NSColor(white: baseWhite, alpha: bgAlpha).setFill()
     trackPath.fill()
 
     guard let ctx = NSGraphicsContext.current else { return }
@@ -95,7 +96,7 @@ func drawBarMonochrome(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat,
         trackPath.setClip()
         let fillColor = fillFrac >= 0.9
             ? NSColor(red: 1.0, green: 0.45, blue: 0.10, alpha: 1.0)
-            : NSColor(white: 1.0, alpha: 0.75)
+            : NSColor(white: baseWhite, alpha: 0.75)
         fillColor.setFill()
         NSRect(x: x, y: y, width: fw, height: h).fill()
         ctx.restoreGraphicsState()
@@ -109,14 +110,15 @@ func drawBarMonochrome(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat,
     ctx.restoreGraphicsState()
 }
 
-func makeIcon(sUsage: Double, sTime: Double, wUsage: Double, wTime: Double) -> NSImage {
+func makeIcon(sUsage: Double, sTime: Double, wUsage: Double, wTime: Double,
+              isDark: Bool = true) -> NSImage {
     let img = NSImage(size: NSSize(width: iconW, height: iconH), flipped: false) { _ in
         drawBarMonochrome(x: barX0, y: sessionY, w: barW, h: barH,
                           corner: barCorner, fillFrac: sUsage / 100, tickFrac: sTime / 100,
-                          bgAlpha: iconBgAlpha)
+                          bgAlpha: iconBgAlpha, isDark: isDark)
         drawBarMonochrome(x: barX0, y: weeklyY, w: barW, h: barH,
                           corner: barCorner, fillFrac: wUsage / 100, tickFrac: wTime / 100,
-                          bgAlpha: iconBgAlpha)
+                          bgAlpha: iconBgAlpha, isDark: isDark)
         return true
     }
     img.isTemplate = false

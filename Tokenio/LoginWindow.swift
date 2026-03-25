@@ -21,6 +21,8 @@ class LoginWindow: NSObject, WKNavigationDelegate {
     private var cookieTimer: Timer?
     private var onSuccess: ((String, String) -> Void)?  // (sessionKey, orgId)
     private var onCancel: (() -> Void)?
+    private var validationRetries = 0
+    private let maxValidationRetries = 5
 
     init(onSuccess: @escaping (String, String) -> Void, onCancel: (() -> Void)? = nil) {
         self.onSuccess = onSuccess
@@ -32,7 +34,7 @@ class LoginWindow: NSObject, WKNavigationDelegate {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .nonPersistent()
 
-        let frame = NSRect(x: 0, y: 0, width: 420, height: 620)
+        let frame = NSRect(x: 0, y: 0, width: 480, height: 700)
         let wv = WKWebView(frame: frame, configuration: config)
         wv.customUserAgent = loginUserAgent
         wv.navigationDelegate = self
@@ -92,7 +94,22 @@ class LoginWindow: NSObject, WKNavigationDelegate {
         // Validate on background thread
         DispatchQueue.global().async { [weak self] in
             guard let orgId = validateAndGetOrg(sessionKey: key) else {
-                DispatchQueue.main.async { self?.startPolling() } // retry
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.validationRetries += 1
+                    if self.validationRetries >= self.maxValidationRetries {
+                        self.stopPolling()
+                        let alert = NSAlert()
+                        alert.messageText = "Login Failed"
+                        alert.informativeText = "Could not validate your session. Please try again."
+                        alert.alertStyle = .warning
+                        alert.runModal()
+                        self.close()
+                        self.onCancel?()
+                    } else {
+                        self.startPolling()
+                    }
+                }
                 return
             }
             saveSession(Session(sessionKey: key, orgId: orgId))
@@ -137,6 +154,7 @@ class LoginWindow: NSObject, WKNavigationDelegate {
             return
         }
         let allowed = allowedDomains.contains { host == $0 || host.hasSuffix(".\($0)") }
+        if !allowed { log.info("Blocked navigation to: \(host)") }
         decisionHandler(allowed ? .allow : .cancel)
     }
 }

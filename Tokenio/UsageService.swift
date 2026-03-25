@@ -1,5 +1,8 @@
 import Foundation
 import Security
+import os
+
+let log = Logger(subsystem: "com.tokenio.app", category: "general")
 
 // MARK: - Data model
 
@@ -79,7 +82,9 @@ func loadSession() -> Session? {
 func saveSession(_ session: Session) {
     let dict: [String: String] = ["sessionKey": session.sessionKey, "orgId": session.orgId]
     if let data = try? JSONSerialization.data(withJSONObject: dict) {
-        keychainSave(service: keychainService, account: keychainAccount, data: data)
+        if !keychainSave(service: keychainService, account: keychainAccount, data: data) {
+            log.error("Failed to save session to keychain")
+        }
     }
 }
 
@@ -106,7 +111,8 @@ func loadOAuthToken() -> String? {
     else { return nil }
 
     if let exp = oauth["expiresAt"] as? Double, exp / 1000 < Date().timeIntervalSince1970 {
-        return nil // expired
+        log.info("OAuth token expired")
+        return nil
     }
     return token
 }
@@ -138,7 +144,7 @@ private let browserHeaders: [String: String] = [
     "content-type": "application/json",
     "anthropic-client-platform": "web_claude_ai",
     "anthropic-client-version": "1.0.0",
-    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
     "origin": "https://claude.ai",
     "referer": "https://claude.ai/settings/usage",
     "sec-fetch-dest": "empty",
@@ -171,6 +177,7 @@ private func apiRequest(path: String, sessionKey: String) -> ApiResult {
             return
         }
         if http.statusCode == 401 || http.statusCode == 403 {
+            log.warning("Auth failure (\(http.statusCode)) on \(path)")
             result = .authFailure
             return
         }
@@ -239,13 +246,13 @@ private func rst(_ block: [String: Any]?) -> TimeInterval {
 }
 
 private func nextMonthTs() -> TimeInterval {
+    var cal = Calendar(identifier: .gregorian)
+    cal.timeZone = TimeZone(identifier: "UTC")!
     let now = Date()
-    let cal = Calendar.current
     var comps = cal.dateComponents([.year, .month], from: now)
     comps.month! += 1
     if comps.month! > 12 { comps.month = 1; comps.year! += 1 }
     comps.day = 1
-    comps.timeZone = TimeZone(identifier: "UTC")
     return cal.date(from: comps)?.timeIntervalSince1970 ?? 0
 }
 
@@ -310,7 +317,7 @@ func fetchUsageOAuth(token: String) -> UsageData? {
     var req = URLRequest(url: url, timeoutInterval: 15)
     req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-    req.setValue("claude-code/2.1.5", forHTTPHeaderField: "User-Agent")
+    req.setValue("claude-code/2.5.0", forHTTPHeaderField: "User-Agent")
 
     var result: [String: Any]?
     let sem = DispatchSemaphore(value: 0)
@@ -345,8 +352,10 @@ func fetchUsage() -> UsageResult {
         let result = fetchUsageSessionKey(session: session)
         switch result {
         case .success:
+            log.info("Fetched usage via session key")
             return result
         case .needsLogin:
+            log.info("Session expired, clearing")
             clearSession()  // confirmed auth failure — clear stale session
             break  // fall through to OAuth
         case .error:
@@ -357,6 +366,7 @@ func fetchUsage() -> UsageResult {
     // Fallback: Claude Code OAuth
     if let token = loadOAuthToken() {
         if let data = fetchUsageOAuth(token: token) {
+            log.info("Fetched usage via OAuth fallback")
             return .success(data)
         }
         return .error("OAuth request failed")
@@ -383,7 +393,9 @@ func fmtAgo(_ ts: TimeInterval) -> String {
     let secs = Int(Date().timeIntervalSince1970 - ts)
     if secs < 60 { return "just now" }
     let mins = secs / 60
-    return mins == 1 ? "1 min ago" : "\(mins) mins ago"
+    if mins < 60 { return mins == 1 ? "1 min ago" : "\(mins) mins ago" }
+    let hrs = mins / 60
+    return hrs == 1 ? "1h ago" : "\(hrs)h ago"
 }
 
 func fmtReset(_ ts: TimeInterval) -> String {

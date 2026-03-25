@@ -13,15 +13,17 @@ Tiny macOS menu bar app that shows your Claude AI usage at a glance.
 
 Each bar is color-coded: **green** = normal, **orange** = near limit (≥90%), **red** = at limit. The transparent notch shows where you are in the time window.
 
+The menu bar icon shows two small bars: the top bar is your current session usage, and the bottom bar is your weekly usage.
+
 ## Install
 
 Download the latest `.zip` from [Releases](https://github.com/elomid/tokenio/releases), unzip, and drag `Tokenio.app` to your Applications folder.
 
-Requires macOS 13 (Ventura) or later.
+Requires macOS 13 (Ventura) or later. Tokenio enables Launch at Login on first run — you can toggle this from the menu.
 
 ## Auth
 
-On first launch, Tokenio opens a browser window to sign in to your Claude account. This works with any login method (Google, Apple, email, etc.).
+On first launch, Tokenio opens a sign-in window to log in to your Claude account. This works with any login method (Google, Apple, email, etc.).
 
 Your session is stored in the macOS Keychain. If you also use Claude Code CLI, Tokenio can use its existing credentials as a fallback — no login needed.
 
@@ -39,7 +41,15 @@ The built app will be in `~/Library/Developer/Xcode/DerivedData/Tokenio-*/Build/
 
 Tokenio reads usage data from Claude's internal API using your session cookie — the same data you see on the [usage page](https://claude.ai/settings/usage). It refreshes every 5 minutes.
 
-No data is sent anywhere except to `claude.ai` (session auth) and `api.anthropic.com` (Claude Code OAuth fallback) for fetching your usage.
+Usage data is only exchanged with `claude.ai` and `api.anthropic.com`. During login, your browser may connect to third-party auth providers (Google, Apple, Microsoft, GitHub) depending on your sign-in method.
+
+Tokenio uses Claude's internal usage API — the same data shown on the [usage settings page](https://claude.ai/settings/usage). This API is undocumented and may change without notice.
+
+## Known limitations
+
+- Relies on Claude's internal API, which may break when Anthropic changes it.
+- If you belong to multiple organizations, Tokenio uses the first one returned by the API.
+- Adding a new SSO provider on Claude's side may require an app update.
 
 ## License
 
