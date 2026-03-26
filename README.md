@@ -19,15 +19,13 @@ The menu bar icon shows two small bars: the top bar is your current session usag
 
 Download the latest `.zip` from [Releases](https://github.com/elomid/tokenio/releases), unzip, and drag `Tokenio.app` to your Applications folder.
 
-Requires macOS 13 (Ventura) or later. Designed for Claude Pro and Max subscribers.
+Requires macOS 13 (Ventura) or later, and **Claude Code CLI** (must be installed and logged in). Designed for Claude Pro and Max subscribers.
 
 Tokenio enables Launch at Login on first run — you can toggle this from the menu.
 
 ## Auth
 
-On first launch, Tokenio opens a sign-in window to log in to your Claude account. This works with any login method (Google, Apple, email, etc.).
-
-Your session is stored in the macOS Keychain. If you also use Claude Code CLI, Tokenio can use its existing credentials as a fallback — no login needed. macOS will show a one-time prompt asking to allow Tokenio access to the Claude Code keychain item; this is expected.
+Tokenio reads usage data using Claude Code CLI's OAuth credentials — no separate login required. On first launch (or after installing a new version), click **Connect to Claude Code…** in the menu. macOS will show a one-time prompt to allow Tokenio access to Claude Code's keychain item; click Always Allow. After that, Tokenio runs silently with no further prompts.
 
 ## Build from source
 
@@ -41,15 +39,15 @@ The built app will be in `build/Build/Products/Release/Tokenio.app`.
 
 ## How it works
 
-Tokenio reads usage data from Claude's internal usage API — the same data shown on the [usage settings page](https://claude.ai/settings/usage). This API is undocumented and may change without notice. Data refreshes every 5 minutes.
+Tokenio reads usage data from Anthropic's OAuth usage API using Claude Code's credentials. The API is undocumented and may change without notice. Data refreshes every 5 minutes.
 
-Usage data is only exchanged with `claude.ai` and `api.anthropic.com`. During login, your browser may connect to third-party auth providers (Google, Apple, Microsoft, GitHub) depending on your sign-in method.
+Usage data is only exchanged with `api.anthropic.com`. No credentials leave your machine.
 
 ## Known limitations
 
 - Relies on Claude's internal API, which may break when Anthropic changes it.
-- If you belong to multiple organizations, Tokenio uses the first one returned by the API.
-- Adding a new SSO provider on Claude's side may require an app update.
+- Requires Claude Code CLI — does not work with a standalone Claude account.
+- If you belong to multiple organizations, usage shown is for your primary account.
 
 ## License
 
