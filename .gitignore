@@ -25,3 +25,6 @@ build/
 
 # Secrets
 .env
+
+# temp planning
+planning/
