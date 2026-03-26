@@ -24,6 +24,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var uiTimer: Timer?
     private var lastFetched: TimeInterval = 0
     private var loading = false
+    private var authFailed = false  // prevents relative-time timer from overwriting auth error state
 
     // Last known icon values for redraw on appearance change
     private var lastSU: Double = 0, lastST: Double = 0
@@ -47,6 +48,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         if loadOAuthToken() != nil {
             triggerFetch()
+        } else {
+            updatedItem.title = "Not connected  ⚠"
+            authFailed = true
         }
 
         fetchTimer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
@@ -177,10 +181,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             lastFetched = Date().timeIntervalSince1970
+            authFailed = false
             updatedItem.title = "Updated just now  ↻"
             updateAuthVisibility()
 
         case .needsLogin:
+            authFailed = true
             updatedItem.title = "Not connected  ⚠"
             updateAuthVisibility()
 
@@ -199,7 +205,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Relative time
 
     private func updateRelativeTime() {
-        guard lastFetched > 0 else { return }
+        guard lastFetched > 0, !authFailed else { return }
         updatedItem.title = "Updated \(fmtAgo(lastFetched))  ↻"
         applyIcon(makeIcon(sUsage: lastSU, sTime: lastST, wUsage: lastWU, wTime: lastWT, isDark: isDarkMenuBar))
     }
