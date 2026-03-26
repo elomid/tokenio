@@ -28,6 +28,7 @@ enum UsageResult {
 
 // MARK: - OAuth (Claude Code CLI credentials)
 
+private let _cacheLock = NSLock()
 private var _cachedToken: String? = nil
 private var _cachedTokenExpiry: TimeInterval = 0
 
@@ -60,17 +61,30 @@ private func readClaudeCodeToken(interactive: Bool) -> String? {
             return nil
         }
     } else {
-        expiry = Date().timeIntervalSince1970 + 3600
+        expiry = Date().timeIntervalSince1970 + 3600 // no expiry field — cache for 1h as a safe default
     }
+    _cacheLock.lock()
     _cachedToken = token
     _cachedTokenExpiry = expiry
+    _cacheLock.unlock()
     return token
+}
+
+// Cache-only check — no keychain access. Safe to call on the main thread.
+func hasCachedToken() -> Bool {
+    _cacheLock.lock()
+    defer { _cacheLock.unlock() }
+    return _cachedToken != nil && Date().timeIntervalSince1970 < _cachedTokenExpiry
 }
 
 // Silent read — used by background timer and visibility checks.
 // Returns cached token if still valid, otherwise tries a no-dialog keychain read.
 func loadOAuthToken() -> String? {
-    if let token = _cachedToken, Date().timeIntervalSince1970 < _cachedTokenExpiry {
+    _cacheLock.lock()
+    let token = _cachedToken
+    let expiry = _cachedTokenExpiry
+    _cacheLock.unlock()
+    if let token, Date().timeIntervalSince1970 < expiry {
         return token
     }
     return readClaudeCodeToken(interactive: false)
@@ -107,8 +121,10 @@ private func fetchUsageOAuth(token: String) -> UsageResult {
         }
         if http.statusCode == 401 || http.statusCode == 403 {
             log.warning("Auth failure (\(http.statusCode)) on OAuth endpoint")
+            _cacheLock.lock()
             _cachedToken = nil
             _cachedTokenExpiry = 0
+            _cacheLock.unlock()
             result = .needsLogin
             return
         }

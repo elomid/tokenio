@@ -135,11 +135,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if !isBackground { updatedItem?.title = "Refreshing…  ↻" }
         DispatchQueue.global().async { [weak self] in
             let result = fetchUsage()
-            DispatchQueue.main.async { self?.handleResult(result, isBackground: isBackground) }
+            DispatchQueue.main.async { self?.handleResult(result) }
         }
     }
 
-    private func handleResult(_ result: UsageResult, isBackground: Bool = false) {
+    private func handleResult(_ result: UsageResult) {
         loading = false
 
         switch result {
@@ -193,7 +193,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Auth visibility
 
     private func updateAuthVisibility() {
-        connectItem.isHidden = loadOAuthToken() != nil
+        connectItem.isHidden = hasCachedToken()
     }
 
     // MARK: - Relative time

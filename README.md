@@ -25,7 +25,7 @@ Tokenio enables Launch at Login on first run — you can toggle this from the me
 
 ## Auth
 
-Tokenio reads usage data using Claude Code CLI's OAuth credentials — no separate login required. On first launch (or after installing a new version), click **Connect to Claude Code…** in the menu. macOS will show a one-time prompt to allow Tokenio access to Claude Code's keychain item; click Always Allow. After that, Tokenio runs silently with no further prompts.
+Tokenio reads usage data using Claude Code CLI's OAuth credentials — no separate login required. On first launch (or after installing a new version), click **Connect to Claude Code…** in the menu. macOS may show a one-time prompt to allow Tokenio access to Claude Code's keychain item — click Always Allow if it appears. After that, Tokenio runs silently with no further prompts.
 
 ## Build from source
 
