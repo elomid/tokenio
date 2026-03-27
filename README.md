@@ -25,7 +25,9 @@ Tokenio enables Launch at Login on first run — you can toggle this from the me
 
 ## Auth
 
-Tokenio reads usage data using Claude Code CLI's OAuth credentials — no separate login required. On first launch (or after installing a new version), click **Connect to Claude Code…** in the menu. macOS may show a one-time prompt to allow Tokenio access to Claude Code's keychain item — click Always Allow if it appears. After that, Tokenio runs silently with no further prompts.
+Tokenio uses Claude Code CLI's OAuth credentials — no separate login required. On first launch, click **Connect to Claude Code…** in the menu. macOS may prompt once to allow Tokenio to read Claude Code's keychain — after that, the imported token is stored in Tokenio's own keychain and background refreshes never touch Claude Code's credentials.
+
+The imported access token expires after several hours. When it does, Tokenio keeps showing your last-known usage data and displays a **Reconnect to Claude Code…** option. Click it to import a fresh token — one prompt, done.
 
 ## Build from source
 
@@ -47,6 +49,7 @@ Usage data is only exchanged with `api.anthropic.com`. No credentials leave your
 
 - Relies on Claude's internal API, which may break when Anthropic changes it.
 - Requires Claude Code CLI — does not work with a standalone Claude account.
+- Imported access token expires after several hours. Click Reconnect in the menu when this happens.
 - If you belong to multiple organizations, usage shown is for your primary account.
 
 ## License

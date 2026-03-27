@@ -43,14 +43,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        applyIcon(makeIcon(sUsage: 0, sTime: 0, wUsage: 0, wTime: 0, isDark: isDarkMenuBar))
         buildMenu()
 
-        if loadOAuthToken() != nil {
-            triggerFetch()
+        if loadStoredAccess() != nil {
+            // Connected — show snapshot immediately if available, then refresh
+            if let (snapshot, ts) = loadSnapshot() {
+                applySnapshot(snapshot)
+                lastFetched = ts
+                updatedItem.title = "Updated \(fmtAgo(ts))  ↻"
+            } else {
+                applyIcon(makeIcon(sUsage: 0, sTime: 0, wUsage: 0, wTime: 0, isDark: isDarkMenuBar))
+            }
+            triggerFetch(isBackground: true)
         } else {
-            updatedItem.title = "Not connected  ⚠"
+            // Disconnected — warning icon, show stale data if any
+            applyIcon(makeDisconnectedIcon())
+            if let (snapshot, ts) = loadSnapshot() {
+                applySnapshot(snapshot, iconOverride: false)
+                lastFetched = ts
+                updatedItem.title = "Disconnected (data from \(fmtAgo(ts)))  ⚠"
+            } else {
+                updatedItem.title = "Not connected  ⚠"
+            }
             authFailed = true
+            updateAuthVisibility()
+            // Auto-open menu on first launch so user sees what to do
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.statusItem.button?.performClick(nil)
+            }
         }
 
         fetchTimer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
@@ -139,47 +159,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if !isBackground { updatedItem?.title = "Refreshing…  ↻" }
         DispatchQueue.global().async { [weak self] in
             let result = fetchUsage()
-            DispatchQueue.main.async { self?.handleResult(result) }
+            DispatchQueue.main.async { self?.handleResult(result, isBackground: isBackground) }
         }
     }
 
-    private func handleResult(_ result: UsageResult) {
+    private func handleResult(_ result: UsageResult, isBackground: Bool) {
         loading = false
 
         switch result {
         case .success(let d):
-            var sU = d.sessionPct
-            let sR = d.sessionReset
-            if sR > 0, sR < Date().timeIntervalSince1970 { sU = 0 }
-            let sT = elapsedPct(resetTs: sR, windowSecs: 5 * 3600)
-
-            let wU = d.weeklyPct
-            let wR = d.weeklyReset
-            let wT = elapsedPct(resetTs: wR, windowSecs: 7 * 24 * 3600)
-
-            lastSU = sU; lastST = sT; lastWU = wU; lastWT = wT
-            applyIcon(makeIcon(sUsage: sU, sTime: sT, wUsage: wU, wTime: wT, isDark: isDarkMenuBar))
-
-            let snU = d.sonnetPct
-            let snR = d.sonnetReset
-            let snT = elapsedPct(resetTs: snR, windowSecs: 7 * 24 * 3600)
-
-            sessionView.setData(value: "\(Int(sU))%", usageFrac: sU / 100, timeFrac: sT / 100, resetStr: "Resets in \(fmtReset(sR))")
-            weeklyView.setData(value: "\(Int(wU))%", usageFrac: wU / 100, timeFrac: wT / 100, resetStr: "Resets in \(fmtReset(wR))")
-            sonnetView.setData(value: "\(Int(snU))%", usageFrac: snU / 100, timeFrac: snT / 100, resetStr: "Resets in \(fmtReset(snR))")
-
-            if d.extraEnabled {
-                let oU = d.overagePct
-                let oR = d.overageReset
-                let daysInMonth = Double(Calendar.current.range(of: .day, in: .month, for: Date())?.count ?? 30)
-                let oT = elapsedPct(resetTs: oR, windowSecs: daysInMonth * 24 * 3600)
-                extraView.setTitle("Extra usage", suffix: "$\(String(format: "%.2f", d.extraDollars))")
-                extraView.setData(value: "\(Int(oU))%", usageFrac: oU / 100, timeFrac: oT / 100, resetStr: "Resets in \(fmtReset(oR))")
-            } else {
-                extraView.setTitle("Extra usage")
-                extraView.setData(value: "Not enabled", usageFrac: 0, timeFrac: 0, resetStr: "")
-            }
-
+            applySnapshot(d)
             lastFetched = Date().timeIntervalSince1970
             authFailed = false
             updatedItem.title = "Updated just now  ↻"
@@ -187,7 +176,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         case .needsLogin:
             authFailed = true
-            updatedItem.title = "Not connected  ⚠"
+            applyIcon(makeDisconnectedIcon())
+            if lastFetched > 0 {
+                updatedItem.title = "Disconnected (data from \(fmtAgo(lastFetched)))  ⚠"
+            } else {
+                updatedItem.title = "Not connected  ⚠"
+            }
             updateAuthVisibility()
 
         case .error(let msg):
@@ -196,10 +190,48 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func applySnapshot(_ d: UsageData, iconOverride: Bool = true) {
+        var sU = d.sessionPct
+        let sR = d.sessionReset
+        if sR > 0, sR < Date().timeIntervalSince1970 { sU = 0 }
+        let sT = elapsedPct(resetTs: sR, windowSecs: 5 * 3600)
+
+        let wU = d.weeklyPct
+        let wR = d.weeklyReset
+        let wT = elapsedPct(resetTs: wR, windowSecs: 7 * 24 * 3600)
+
+        lastSU = sU; lastST = sT; lastWU = wU; lastWT = wT
+        if iconOverride {
+            applyIcon(makeIcon(sUsage: sU, sTime: sT, wUsage: wU, wTime: wT, isDark: isDarkMenuBar))
+        }
+
+        let snU = d.sonnetPct
+        let snR = d.sonnetReset
+        let snT = elapsedPct(resetTs: snR, windowSecs: 7 * 24 * 3600)
+
+        sessionView.setData(value: "\(Int(sU))%", usageFrac: sU / 100, timeFrac: sT / 100, resetStr: "Resets in \(fmtReset(sR))")
+        weeklyView.setData(value: "\(Int(wU))%", usageFrac: wU / 100, timeFrac: wT / 100, resetStr: "Resets in \(fmtReset(wR))")
+        sonnetView.setData(value: "\(Int(snU))%", usageFrac: snU / 100, timeFrac: snT / 100, resetStr: "Resets in \(fmtReset(snR))")
+
+        if d.extraEnabled {
+            let oU = d.overagePct
+            let oR = d.overageReset
+            let daysInMonth = Double(Calendar.current.range(of: .day, in: .month, for: Date())?.count ?? 30)
+            let oT = elapsedPct(resetTs: oR, windowSecs: daysInMonth * 24 * 3600)
+            extraView.setTitle("Extra usage", suffix: "$\(String(format: "%.2f", d.extraDollars))")
+            extraView.setData(value: "\(Int(oU))%", usageFrac: oU / 100, timeFrac: oT / 100, resetStr: "Resets in \(fmtReset(oR))")
+        } else {
+            extraView.setTitle("Extra usage")
+            extraView.setData(value: "Not enabled", usageFrac: 0, timeFrac: 0, resetStr: "")
+        }
+    }
+
     // MARK: - Auth visibility
 
     private func updateAuthVisibility() {
-        connectItem.isHidden = hasCachedToken()
+        let connected = loadStoredAccess() != nil
+        connectItem.isHidden = connected
+        connectItem.title = lastFetched > 0 ? "Reconnect to Claude Code…" : "Connect to Claude Code…"
     }
 
     // MARK: - Relative time
@@ -217,15 +249,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func wakeRefresh() { triggerFetch(isBackground: true) }
 
     @objc private func connectClicked() {
+        // Explain what's about to happen before the system keychain prompt
+        let explain = NSAlert()
+        explain.messageText = "Connect to Claude Code"
+        explain.informativeText = "Tokenio will read your Claude Code credentials to display usage data.\n\nmacOS will ask you to allow keychain access — click \"Always Allow\" so Tokenio can reconnect without prompting again."
+        explain.addButton(withTitle: "Continue")
+        explain.addButton(withTitle: "Cancel")
+        explain.alertStyle = .informational
+
+        guard explain.runModal() == .alertFirstButtonReturn else { return }
+
         DispatchQueue.global().async { [weak self] in
-            let token = loadOAuthTokenInteractive()
+            let imported = importClaudeCodeAccessInteractive()
             DispatchQueue.main.async {
-                if token != nil {
+                if imported != nil {
+                    self?.authFailed = false
                     self?.triggerFetch(isBackground: false)
                 } else {
                     let alert = NSAlert()
                     alert.messageText = "Not Connected"
-                    alert.informativeText = "No valid Claude Code credentials found. Make sure Claude Code CLI is installed and you're logged in. If you were previously connected, try restarting Claude Code to refresh credentials."
+                    alert.informativeText = "No valid Claude Code credentials found, or the token is expired. Make sure Claude Code CLI is installed and you're logged in."
                     alert.alertStyle = .warning
                     alert.runModal()
                 }

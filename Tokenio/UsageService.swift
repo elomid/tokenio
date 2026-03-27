@@ -1,6 +1,5 @@
 import Foundation
 import Security
-import LocalAuthentication
 import os
 
 let log = Logger(subsystem: "com.tokenio.app", category: "general")
@@ -26,25 +25,47 @@ enum UsageResult {
     case error(String)
 }
 
-// MARK: - OAuth (Claude Code CLI credentials)
+// MARK: - Tokenio-owned OAuth storage
 
-private let _cacheLock = NSLock()
-private var _cachedToken: String? = nil
-private var _cachedTokenExpiry: TimeInterval = 0
+struct StoredOAuthAccess: Codable {
+    var accessToken: String
+    var expiresAt: TimeInterval     // seconds since epoch
+    var subscriptionType: String?
+}
 
-private func readClaudeCodeToken(interactive: Bool) -> String? {
-    var query: [String: Any] = [
+private let storedAccessKey = "storedOAuthAccess"
+
+@discardableResult
+func saveStoredAccess(_ access: StoredOAuthAccess) -> Bool {
+    guard let data = try? JSONEncoder().encode(access) else { return false }
+    UserDefaults.standard.set(data, forKey: storedAccessKey)
+    return true
+}
+
+func loadStoredAccess() -> StoredOAuthAccess? {
+    guard let data = UserDefaults.standard.data(forKey: storedAccessKey),
+          let stored = try? JSONDecoder().decode(StoredOAuthAccess.self, from: data)
+    else { return nil }
+    if stored.expiresAt < Date().timeIntervalSince1970 {
+        log.info("Stored access token expired")
+        return nil
+    }
+    return stored
+}
+
+func clearStoredAccess() {
+    UserDefaults.standard.removeObject(forKey: storedAccessKey)
+}
+
+// One-time interactive import from Claude Code's keychain.
+// This is the ONLY code path that touches "Claude Code-credentials".
+func importClaudeCodeAccessInteractive() -> StoredOAuthAccess? {
+    let query: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: "Claude Code-credentials",
         kSecReturnData as String: true,
         kSecMatchLimit as String: kSecMatchLimitOne,
     ]
-    if !interactive {
-        // Fail silently instead of showing a dialog — used for all background reads
-        let ctx = LAContext()
-        ctx.interactionNotAllowed = true
-        query[kSecUseAuthenticationContext as String] = ctx
-    }
     var item: CFTypeRef?
     guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
           let data = item as? Data,
@@ -57,43 +78,60 @@ private func readClaudeCodeToken(interactive: Bool) -> String? {
     if let exp = oauth["expiresAt"] as? Double {
         expiry = exp / 1000
         if expiry < Date().timeIntervalSince1970 {
-            log.info("OAuth token expired")
+            log.info("Claude Code token already expired, skipping import")
             return nil
         }
     } else {
-        expiry = Date().timeIntervalSince1970 + 3600 // no expiry field — cache for 1h as a safe default
+        expiry = Date().timeIntervalSince1970 + 3600
     }
-    _cacheLock.lock()
-    _cachedToken = token
-    _cachedTokenExpiry = expiry
-    _cacheLock.unlock()
-    return token
-}
 
-// Cache-only check — no keychain access. Safe to call on the main thread.
-func hasCachedToken() -> Bool {
-    _cacheLock.lock()
-    defer { _cacheLock.unlock() }
-    return _cachedToken != nil && Date().timeIntervalSince1970 < _cachedTokenExpiry
-}
-
-// Silent read — used by background timer and visibility checks.
-// Returns cached token if still valid, otherwise tries a no-dialog keychain read.
-func loadOAuthToken() -> String? {
-    _cacheLock.lock()
-    let token = _cachedToken
-    let expiry = _cachedTokenExpiry
-    _cacheLock.unlock()
-    if let token, Date().timeIntervalSince1970 < expiry {
-        return token
+    let access = StoredOAuthAccess(
+        accessToken: token,
+        expiresAt: expiry,
+        subscriptionType: oauth["subscriptionType"] as? String
+    )
+    guard saveStoredAccess(access) else {
+        log.error("Failed to save imported access token to Tokenio keychain")
+        return nil
     }
-    return readClaudeCodeToken(interactive: false)
+    log.info("Imported Claude Code access token (expires in \(Int((expiry - Date().timeIntervalSince1970) / 3600))h)")
+    return access
 }
 
-// Interactive read — shows keychain dialog if needed.
-// Call only from explicit user actions (e.g. "Connect to Claude Code" menu item).
-func loadOAuthTokenInteractive() -> String? {
-    return readClaudeCodeToken(interactive: true)
+// MARK: - Usage snapshot persistence
+
+private let snapshotKey = "lastUsageSnapshot"
+private let snapshotTimeKey = "lastUsageSnapshotTime"
+
+func saveSnapshot(_ data: UsageData) {
+    let dict: [String: Any] = [
+        "sessionPct": data.sessionPct, "sessionReset": data.sessionReset,
+        "weeklyPct": data.weeklyPct, "weeklyReset": data.weeklyReset,
+        "sonnetPct": data.sonnetPct, "sonnetReset": data.sonnetReset,
+        "overagePct": data.overagePct, "overageReset": data.overageReset,
+        "extraDollars": data.extraDollars, "extraEnabled": data.extraEnabled,
+    ]
+    UserDefaults.standard.set(dict, forKey: snapshotKey)
+    UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: snapshotTimeKey)
+}
+
+func loadSnapshot() -> (UsageData, TimeInterval)? {
+    guard let dict = UserDefaults.standard.dictionary(forKey: snapshotKey) else { return nil }
+    let ts = UserDefaults.standard.double(forKey: snapshotTimeKey)
+    guard ts > 0 else { return nil }
+    let data = UsageData(
+        sessionPct: dict["sessionPct"] as? Double ?? 0,
+        sessionReset: dict["sessionReset"] as? Double ?? 0,
+        weeklyPct: dict["weeklyPct"] as? Double ?? 0,
+        weeklyReset: dict["weeklyReset"] as? Double ?? 0,
+        sonnetPct: dict["sonnetPct"] as? Double ?? 0,
+        sonnetReset: dict["sonnetReset"] as? Double ?? 0,
+        overagePct: dict["overagePct"] as? Double ?? 0,
+        overageReset: dict["overageReset"] as? Double ?? 0,
+        extraDollars: dict["extraDollars"] as? Double ?? 0,
+        extraEnabled: dict["extraEnabled"] as? Bool ?? false
+    )
+    return (data, ts)
 }
 
 // MARK: - API
@@ -121,10 +159,6 @@ private func fetchUsageOAuth(token: String) -> UsageResult {
         }
         if http.statusCode == 401 || http.statusCode == 403 {
             log.warning("Auth failure (\(http.statusCode)) on OAuth endpoint")
-            _cacheLock.lock()
-            _cachedToken = nil
-            _cachedTokenExpiry = 0
-            _cacheLock.unlock()
             result = .needsLogin
             return
         }
@@ -160,9 +194,13 @@ private func fetchUsageOAuth(token: String) -> UsageResult {
 }
 
 func fetchUsage() -> UsageResult {
-    guard let token = loadOAuthToken() else { return .needsLogin }
-    let result = fetchUsageOAuth(token: token)
-    if case .success = result { log.info("Fetched usage via OAuth") }
+    guard let stored = loadStoredAccess() else { return .needsLogin }
+    let result = fetchUsageOAuth(token: stored.accessToken)
+    if case .success(let data) = result {
+        log.info("Fetched usage via OAuth")
+        saveSnapshot(data)
+    }
+    if case .needsLogin = result { clearStoredAccess() }
     return result
 }
 

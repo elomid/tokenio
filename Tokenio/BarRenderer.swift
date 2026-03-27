@@ -122,3 +122,12 @@ func makeIcon(sUsage: Double, sTime: Double, wUsage: Double, wTime: Double,
     img.isTemplate = false
     return img
 }
+
+func makeDisconnectedIcon() -> NSImage {
+    let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+    let symbol = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: "Disconnected")?
+        .withSymbolConfiguration(config)
+    let img = symbol ?? NSImage()
+    img.isTemplate = true
+    return img
+}
