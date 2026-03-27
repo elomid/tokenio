@@ -11,6 +11,8 @@
 		A10002 /* BarRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20002; };
 		A10003 /* MetricMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20003; };
 		A10004 /* UsageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20004; };
+		A10005 /* LoginWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20005; };
+		A10007 /* WelcomeWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20009; };
 		A10006 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20008; };
 /* End PBXBuildFile section */
 
@@ -19,6 +21,8 @@
 		A20002 /* BarRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarRenderer.swift; sourceTree = "<group>"; };
 		A20003 /* MetricMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricMenuView.swift; sourceTree = "<group>"; };
 		A20004 /* UsageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageService.swift; sourceTree = "<group>"; };
+		A20005 /* LoginWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginWindow.swift; sourceTree = "<group>"; };
+		A20009 /* WelcomeWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeWindow.swift; sourceTree = "<group>"; };
 		A20006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A20007 /* Tokenio.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Tokenio.entitlements; sourceTree = "<group>"; };
 		A20008 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -59,6 +63,8 @@
 				A20002 /* BarRenderer.swift */,
 				A20003 /* MetricMenuView.swift */,
 				A20004 /* UsageService.swift */,
+				A20005 /* LoginWindow.swift */,
+				A20009 /* WelcomeWindow.swift */,
 				A20006 /* Info.plist */,
 				A20007 /* Tokenio.entitlements */,
 				A20008 /* Assets.xcassets */,
@@ -131,6 +137,8 @@
 				A10002 /* BarRenderer.swift in Sources */,
 				A10003 /* MetricMenuView.swift in Sources */,
 				A10004 /* UsageService.swift in Sources */,
+				A10005 /* LoginWindow.swift in Sources */,
+				A10007 /* WelcomeWindow.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -19,15 +19,15 @@ The menu bar icon shows two small bars: the top bar is your current session usag
 
 Download the latest `.zip` from [Releases](https://github.com/elomid/tokenio/releases), unzip, and drag `Tokenio.app` to your Applications folder.
 
-Requires macOS 13 (Ventura) or later, and **Claude Code CLI** (must be installed and logged in). Designed for Claude Pro and Max subscribers.
+Requires macOS 13 (Ventura) or later. Designed for Claude Pro and Max subscribers.
 
 Tokenio enables Launch at Login on first run — you can toggle this from the menu.
 
 ## Auth
 
-Tokenio uses Claude Code CLI's OAuth credentials — no separate login required. On first launch, click **Connect to Claude Code…** in the menu. macOS will prompt once to allow Tokenio to read Claude Code's keychain — click **Always Allow**. The imported token is stored locally and all background refreshes run without touching Claude Code's credentials again.
+On first launch, Tokenio shows a welcome screen. Click **Log in to Claude** to sign in with your Claude account via email verification. Google sign-in is not supported — use "Continue with email" instead.
 
-The imported access token expires after several hours. When it does, Tokenio keeps showing your last-known usage data and displays a **Reconnect to Claude Code…** option. Click it to import a fresh token — one keychain prompt, done.
+Your session is stored locally and persists across restarts. No keychain prompts, no CLI required.
 
 ## Build from source
 
@@ -41,15 +41,14 @@ The built app will be in `build/Build/Products/Release/Tokenio.app`.
 
 ## How it works
 
-Tokenio imports a Claude Code OAuth token once via an explicit Connect action (the only time it reads Claude Code's keychain). It then uses that token to fetch usage data from Anthropic's OAuth API every 5 minutes. The API is undocumented and may change without notice.
+Tokenio signs you in via claude.ai and stores a session key locally. It then fetches usage data from Claude's API every 5 minutes. The API is undocumented and may change without notice.
 
-Usage data is only exchanged with `api.anthropic.com`. The imported token is stored in the app's local preferences — no credentials leave your machine.
+Usage data is only exchanged with `claude.ai`. Your session key is stored in your macOS keychain under Tokenio's own entry — no credentials leave your machine.
 
 ## Known limitations
 
 - Relies on Claude's internal API, which may break when Anthropic changes it.
-- Requires Claude Code CLI — does not work with a standalone Claude account.
-- Imported access token expires after several hours. Click Reconnect in the menu when this happens.
+- Google sign-in is not supported — use email verification instead.
 - If you belong to multiple organizations, usage shown is for your primary account.
 
 ## License

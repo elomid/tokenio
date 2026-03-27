@@ -25,77 +25,71 @@ enum UsageResult {
     case error(String)
 }
 
-// MARK: - Tokenio-owned OAuth storage
+// MARK: - Keychain (Tokenio-owned)
 
-struct StoredOAuthAccess: Codable {
-    var accessToken: String
-    var expiresAt: TimeInterval     // seconds since epoch
-    var subscriptionType: String?
-}
+private let keychainService = "tokenio"
+private let keychainAccount = "session"
 
-private let storedAccessKey = "storedOAuthAccess"
-
-@discardableResult
-func saveStoredAccess(_ access: StoredOAuthAccess) -> Bool {
-    guard let data = try? JSONEncoder().encode(access) else { return false }
-    UserDefaults.standard.set(data, forKey: storedAccessKey)
-    return true
-}
-
-func loadStoredAccess() -> StoredOAuthAccess? {
-    guard let data = UserDefaults.standard.data(forKey: storedAccessKey),
-          let stored = try? JSONDecoder().decode(StoredOAuthAccess.self, from: data)
-    else { return nil }
-    if stored.expiresAt < Date().timeIntervalSince1970 {
-        log.info("Stored access token expired")
-        return nil
-    }
-    return stored
-}
-
-func clearStoredAccess() {
-    UserDefaults.standard.removeObject(forKey: storedAccessKey)
-}
-
-// One-time interactive import from Claude Code's keychain.
-// This is the ONLY code path that touches "Claude Code-credentials".
-func importClaudeCodeAccessInteractive() -> StoredOAuthAccess? {
+private func keychainSave(service: String, account: String, data: Data) -> Bool {
+    keychainDelete(service: service, account: account)
     let query: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: "Claude Code-credentials",
+        kSecAttrService as String: service,
+        kSecAttrAccount as String: account,
+        kSecValueData as String: data,
+    ]
+    return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
+}
+
+private func keychainLoad(service: String, account: String) -> Data? {
+    let query: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: service,
+        kSecAttrAccount as String: account,
         kSecReturnData as String: true,
         kSecMatchLimit as String: kSecMatchLimitOne,
     ]
     var item: CFTypeRef?
-    guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-          let data = item as? Data,
-          let creds = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let oauth = creds["claudeAiOauth"] as? [String: Any],
-          let token = oauth["accessToken"] as? String
+    guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess else { return nil }
+    return item as? Data
+}
+
+@discardableResult
+private func keychainDelete(service: String, account: String) -> Bool {
+    let query: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: service,
+        kSecAttrAccount as String: account,
+    ]
+    return SecItemDelete(query as CFDictionary) == errSecSuccess
+}
+
+// MARK: - Session storage
+
+struct Session {
+    let sessionKey: String
+    let orgId: String
+}
+
+func loadSession() -> Session? {
+    guard let data = keychainLoad(service: keychainService, account: keychainAccount),
+          let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+          let key = dict["sessionKey"], let org = dict["orgId"]
     else { return nil }
+    return Session(sessionKey: key, orgId: org)
+}
 
-    let expiry: TimeInterval
-    if let exp = oauth["expiresAt"] as? Double {
-        expiry = exp / 1000
-        if expiry < Date().timeIntervalSince1970 {
-            log.info("Claude Code token already expired, skipping import")
-            return nil
+func saveSession(_ session: Session) {
+    let dict: [String: String] = ["sessionKey": session.sessionKey, "orgId": session.orgId]
+    if let data = try? JSONSerialization.data(withJSONObject: dict) {
+        if !keychainSave(service: keychainService, account: keychainAccount, data: data) {
+            log.error("Failed to save session to keychain")
         }
-    } else {
-        expiry = Date().timeIntervalSince1970 + 3600
     }
+}
 
-    let access = StoredOAuthAccess(
-        accessToken: token,
-        expiresAt: expiry,
-        subscriptionType: oauth["subscriptionType"] as? String
-    )
-    guard saveStoredAccess(access) else {
-        log.error("Failed to save imported access token to Tokenio keychain")
-        return nil
-    }
-    log.info("Imported Claude Code access token (expires in \(Int((expiry - Date().timeIntervalSince1970) / 3600))h)")
-    return access
+func clearSession() {
+    keychainDelete(service: keychainService, account: keychainAccount)
 }
 
 // MARK: - Usage snapshot persistence
@@ -134,73 +128,167 @@ func loadSnapshot() -> (UsageData, TimeInterval)? {
     return (data, ts)
 }
 
+func clearSnapshot() {
+    UserDefaults.standard.removeObject(forKey: snapshotKey)
+    UserDefaults.standard.removeObject(forKey: snapshotTimeKey)
+}
+
 // MARK: - API
 
-private func fetchUsageOAuth(token: String) -> UsageResult {
-    guard let url = URL(string: "https://api.anthropic.com/api/oauth/usage") else {
-        return .error("Bad URL")
-    }
-    var req = URLRequest(url: url, timeoutInterval: 15)
-    req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-    req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-    req.setValue("claude-code/2.5.0", forHTTPHeaderField: "User-Agent")
+private let browserHeaders: [String: String] = [
+    "accept": "*/*",
+    "accept-language": "en-US,en;q=0.9",
+    "content-type": "application/json",
+    "anthropic-client-platform": "web_claude_ai",
+    "anthropic-client-version": "1.0.0",
+    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+    "origin": "https://claude.ai",
+    "referer": "https://claude.ai/settings/usage",
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin",
+]
 
-    var result: UsageResult = .error("Request timed out")
+private enum ApiResult {
+    case success(Any)
+    case authFailure
+    case networkError(String)
+}
+
+private func apiRequest(path: String, sessionKey: String) -> ApiResult {
+    guard let url = URL(string: "https://claude.ai\(path)") else { return .networkError("Bad URL") }
+    var req = URLRequest(url: url, timeoutInterval: 15)
+    for (k, v) in browserHeaders { req.setValue(v, forHTTPHeaderField: k) }
+    req.setValue("sessionKey=\(sessionKey)", forHTTPHeaderField: "Cookie")
+
+    var result: ApiResult = .networkError("Request timed out")
     let sem = DispatchSemaphore(value: 0)
     URLSession.shared.dataTask(with: req) { data, resp, error in
         defer { sem.signal() }
         if let error {
-            result = .error(error.localizedDescription)
+            result = .networkError(error.localizedDescription)
             return
         }
         guard let http = resp as? HTTPURLResponse else {
-            result = .error("No response")
+            result = .networkError("No response")
             return
         }
         if http.statusCode == 401 || http.statusCode == 403 {
-            log.warning("Auth failure (\(http.statusCode)) on OAuth endpoint")
-            result = .needsLogin
+            log.warning("Auth failure (\(http.statusCode)) on \(path)")
+            result = .authFailure
             return
         }
         guard (200...299).contains(http.statusCode) else {
-            result = .error("HTTP \(http.statusCode)")
+            result = .networkError("HTTP \(http.statusCode)")
             return
         }
         guard let data else {
-            result = .error("No data")
+            result = .networkError("No data")
             return
         }
-        guard let d = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            result = .error("Invalid JSON")
+        if let prefix = String(data: data.prefix(5), encoding: .utf8),
+           prefix.hasPrefix("<!DOC") || prefix.hasPrefix("<html") {
+            result = .authFailure
             return
         }
-        let ex = (d["extra_usage"] as? [String: Any]) ?? [:]
-        let usedCents = (ex["used_credits"] as? Int) ?? 0
-        result = .success(UsageData(
-            sessionPct: pct(d["five_hour"] as? [String: Any]),
-            sessionReset: rst(d["five_hour"] as? [String: Any]),
-            weeklyPct: pct(d["seven_day"] as? [String: Any]),
-            weeklyReset: rst(d["seven_day"] as? [String: Any]),
-            sonnetPct: pct(d["seven_day_sonnet"] as? [String: Any]),
-            sonnetReset: rst(d["seven_day_sonnet"] as? [String: Any]),
-            overagePct: (ex["utilization"] as? Double) ?? 0,
-            overageReset: nextMonthTs(),
-            extraDollars: Double(usedCents) / 100,
-            extraEnabled: (ex["is_enabled"] as? Bool) ?? false
-        ))
+        if let json = try? JSONSerialization.jsonObject(with: data) {
+            result = .success(json)
+        } else {
+            result = .networkError("Invalid JSON")
+        }
     }.resume()
     sem.wait()
     return result
 }
 
+private func apiRequestDict(path: String, sessionKey: String) -> ApiResult {
+    let result = apiRequest(path: path, sessionKey: sessionKey)
+    switch result {
+    case .success(let json):
+        if let dict = json as? [String: Any] {
+            return .success(dict)
+        }
+        return .networkError("Unexpected response format")
+    default:
+        return result
+    }
+}
+
+func validateAndGetOrg(sessionKey: String) -> String? {
+    guard case .success(let json) = apiRequest(path: "/api/organizations", sessionKey: sessionKey),
+          let arr = json as? [[String: Any]],
+          let first = arr.first,
+          let uuid = first["uuid"] as? String
+    else { return nil }
+    return uuid
+}
+
+// MARK: - Fetch usage
+
+private func fetchUsageSessionKey(session: Session) -> UsageResult {
+    let group = DispatchGroup()
+    var usageResult: ApiResult = .networkError("Not started")
+    var overageResult: ApiResult = .networkError("Not started")
+
+    group.enter()
+    DispatchQueue.global().async {
+        usageResult = apiRequestDict(path: "/api/organizations/\(session.orgId)/usage", sessionKey: session.sessionKey)
+        group.leave()
+    }
+
+    group.enter()
+    DispatchQueue.global().async {
+        overageResult = apiRequestDict(path: "/api/organizations/\(session.orgId)/overage_spend_limit", sessionKey: session.sessionKey)
+        group.leave()
+    }
+
+    group.wait()
+
+    if case .authFailure = usageResult { return .needsLogin }
+    if case .authFailure = overageResult { return .needsLogin }
+
+    guard case .success(let usageJson) = usageResult,
+          let usage = usageJson as? [String: Any] else {
+        if case .networkError(let msg) = usageResult {
+            return .error(msg)
+        }
+        return .error("Failed to fetch usage")
+    }
+
+    let ov: [String: Any]
+    if case .success(let overageJson) = overageResult, let dict = overageJson as? [String: Any] {
+        ov = dict
+    } else {
+        ov = [:]
+    }
+
+    let usedCents = (ov["used_credits"] as? Int) ?? 0
+
+    return .success(UsageData(
+        sessionPct: pct(usage["five_hour"] as? [String: Any]),
+        sessionReset: rst(usage["five_hour"] as? [String: Any]),
+        weeklyPct: pct(usage["seven_day"] as? [String: Any]),
+        weeklyReset: rst(usage["seven_day"] as? [String: Any]),
+        sonnetPct: pct(usage["seven_day_sonnet"] as? [String: Any]),
+        sonnetReset: rst(usage["seven_day_sonnet"] as? [String: Any]),
+        overagePct: (ov["utilization"] as? Double) ?? 0,
+        overageReset: nextMonthTs(),
+        extraDollars: Double(usedCents) / 100,
+        extraEnabled: (ov["is_enabled"] as? Bool) ?? false
+    ))
+}
+
 func fetchUsage() -> UsageResult {
-    guard let stored = loadStoredAccess() else { return .needsLogin }
-    let result = fetchUsageOAuth(token: stored.accessToken)
+    guard let session = loadSession() else { return .needsLogin }
+    let result = fetchUsageSessionKey(session: session)
     if case .success(let data) = result {
-        log.info("Fetched usage via OAuth")
+        log.info("Fetched usage via session key")
         saveSnapshot(data)
     }
-    if case .needsLogin = result { clearStoredAccess() }
+    if case .needsLogin = result {
+        log.info("Session expired, clearing")
+        clearSession()
+    }
     return result
 }
 

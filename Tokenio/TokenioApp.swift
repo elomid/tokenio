@@ -17,14 +17,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var sonnetView: MetricMenuView!
     private var extraView: MetricMenuView!
     private var updatedItem: NSMenuItem!
-    private var connectItem: NSMenuItem!
+    private var loginItem: NSMenuItem!
+    private var logoutItem: NSMenuItem!
     private var launchAtLoginItem: NSMenuItem!
 
     private var fetchTimer: Timer?
     private var uiTimer: Timer?
     private var lastFetched: TimeInterval = 0
     private var loading = false
-    private var authFailed = false  // prevents relative-time timer from overwriting auth error state
+    private var authFailed = false
+    private var loginWindow: LoginWindow?
+    private var welcomeWindow: WelcomeWindow?
 
     // Last known icon values for redraw on appearance change
     private var lastSU: Double = 0, lastST: Double = 0
@@ -45,31 +48,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         buildMenu()
 
-        if loadStoredAccess() != nil {
-            // Connected — show snapshot immediately if available, then refresh
+        if loadSession() != nil {
+            // Logged in — show snapshot immediately if available, then refresh
             if let (snapshot, ts) = loadSnapshot() {
                 applySnapshot(snapshot)
                 lastFetched = ts
-                updatedItem.title = "Updated \(fmtAgo(ts))  ↻"
+                updatedItem.title = "Updated \(fmtAgo(ts))  \u{21bb}"
             } else {
                 applyIcon(makeIcon(sUsage: 0, sTime: 0, wUsage: 0, wTime: 0, isDark: isDarkMenuBar))
             }
             triggerFetch(isBackground: true)
         } else {
-            // Disconnected — warning icon, show stale data if any
+            // Not logged in — warning icon, show stale data if any
             applyIcon(makeDisconnectedIcon())
             if let (snapshot, ts) = loadSnapshot() {
                 applySnapshot(snapshot, iconOverride: false)
                 lastFetched = ts
-                updatedItem.title = "Disconnected (data from \(fmtAgo(ts)))  ⚠"
+                updatedItem.title = "Not logged in  \u{26a0}"
             } else {
-                updatedItem.title = "Not connected  ⚠"
+                updatedItem.title = "Not logged in  \u{26a0}"
             }
             authFailed = true
             updateAuthVisibility()
-            // Auto-open menu on first launch so user sees what to do
+            // Show welcome window on first launch
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.statusItem.button?.performClick(nil)
+                self?.showWelcome()
             }
         }
 
@@ -111,15 +114,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         addMetric(sonnetView)
         addMetric(extraView)
 
-        updatedItem = NSMenuItem(title: "Refreshing…  ↻", action: #selector(refreshClicked), keyEquivalent: "")
+        updatedItem = NSMenuItem(title: "Refreshing\u{2026}  \u{21bb}", action: #selector(refreshClicked), keyEquivalent: "")
         updatedItem.target = self
         menu.addItem(updatedItem)
 
         menu.addItem(.separator())
 
-        connectItem = NSMenuItem(title: "Connect to Claude Code…", action: #selector(connectClicked), keyEquivalent: "")
-        connectItem.target = self
-        menu.addItem(connectItem)
+        loginItem = NSMenuItem(title: "Log in to Claude\u{2026}", action: #selector(loginClicked), keyEquivalent: "")
+        loginItem.target = self
+        menu.addItem(loginItem)
+
+        logoutItem = NSMenuItem(title: "Log out", action: #selector(logoutClicked), keyEquivalent: "")
+        logoutItem.target = self
+        menu.addItem(logoutItem)
+
         updateAuthVisibility()
 
         launchAtLoginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
@@ -154,9 +162,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Fetch
 
     private func triggerFetch(isBackground: Bool = false) {
-        guard !loading else { return }
+        guard !loading, !authFailed else { return }
         loading = true
-        if !isBackground { updatedItem?.title = "Refreshing…  ↻" }
+        if !isBackground { updatedItem?.title = "Refreshing\u{2026}  \u{21bb}" }
         DispatchQueue.global().async { [weak self] in
             let result = fetchUsage()
             DispatchQueue.main.async { self?.handleResult(result, isBackground: isBackground) }
@@ -171,22 +179,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             applySnapshot(d)
             lastFetched = Date().timeIntervalSince1970
             authFailed = false
-            updatedItem.title = "Updated just now  ↻"
+            updatedItem.title = "Updated just now  \u{21bb}"
             updateAuthVisibility()
 
         case .needsLogin:
             authFailed = true
             applyIcon(makeDisconnectedIcon())
             if lastFetched > 0 {
-                updatedItem.title = "Disconnected (data from \(fmtAgo(lastFetched)))  ⚠"
+                updatedItem.title = "Session expired (\(fmtAgo(lastFetched)))  \u{26a0}"
             } else {
-                updatedItem.title = "Not connected  ⚠"
+                updatedItem.title = "Not logged in  \u{26a0}"
             }
             updateAuthVisibility()
 
         case .error(let msg):
-            let short = msg.count > 40 ? String(msg.prefix(40)) + "…" : msg
-            updatedItem.title = "\(short)  ⚠"
+            let short = msg.count > 40 ? String(msg.prefix(40)) + "\u{2026}" : msg
+            updatedItem.title = "\(short)  \u{26a0}"
         }
     }
 
@@ -229,16 +237,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Auth visibility
 
     private func updateAuthVisibility() {
-        let connected = loadStoredAccess() != nil
-        connectItem.isHidden = connected
-        connectItem.title = lastFetched > 0 ? "Reconnect to Claude Code…" : "Connect to Claude Code…"
+        let loggedIn = loadSession() != nil
+        loginItem.isHidden = loggedIn
+        logoutItem.isHidden = !loggedIn
     }
 
     // MARK: - Relative time
 
     private func updateRelativeTime() {
         guard lastFetched > 0, !authFailed else { return }
-        updatedItem.title = "Updated \(fmtAgo(lastFetched))  ↻"
+        updatedItem.title = "Updated \(fmtAgo(lastFetched))  \u{21bb}"
         applyIcon(makeIcon(sUsage: lastSU, sTime: lastST, wUsage: lastWU, wTime: lastWT, isDark: isDarkMenuBar))
     }
 
@@ -248,32 +256,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func wakeRefresh() { triggerFetch(isBackground: true) }
 
-    @objc private func connectClicked() {
-        // Explain what's about to happen before the system keychain prompt
-        let explain = NSAlert()
-        explain.messageText = "Connect to Claude Code"
-        explain.informativeText = "Tokenio will read your Claude Code credentials to display usage data.\n\nmacOS will ask you to allow keychain access — click \"Always Allow\" so Tokenio can reconnect without prompting again."
-        explain.addButton(withTitle: "Continue")
-        explain.addButton(withTitle: "Cancel")
-        explain.alertStyle = .informational
+    private func showWelcome() {
+        welcomeWindow = WelcomeWindow(onLogin: { [weak self] in
+            self?.welcomeWindow = nil
+            self?.loginClicked()
+        })
+        welcomeWindow?.show()
+    }
 
-        guard explain.runModal() == .alertFirstButtonReturn else { return }
-
-        DispatchQueue.global().async { [weak self] in
-            let imported = importClaudeCodeAccessInteractive()
-            DispatchQueue.main.async {
-                if imported != nil {
-                    self?.authFailed = false
-                    self?.triggerFetch(isBackground: false)
-                } else {
-                    let alert = NSAlert()
-                    alert.messageText = "Not Connected"
-                    alert.informativeText = "No valid Claude Code credentials found, or the token is expired. Make sure Claude Code CLI is installed and you're logged in."
-                    alert.alertStyle = .warning
-                    alert.runModal()
-                }
+    @objc private func loginClicked() {
+        loginWindow = LoginWindow(
+            onSuccess: { [weak self] sessionKey, orgId in
+                saveSession(Session(sessionKey: sessionKey, orgId: orgId))
+                self?.authFailed = false
+                self?.loginWindow = nil
+                self?.updateAuthVisibility()
+                self?.triggerFetch(isBackground: false)
+            },
+            onCancel: { [weak self] in
+                self?.loginWindow = nil
             }
-        }
+        )
+        loginWindow?.show()
+    }
+
+    @objc private func logoutClicked() {
+        clearSession()
+        clearSnapshot()
+        authFailed = true
+        lastFetched = 0
+        applyIcon(makeDisconnectedIcon())
+        updatedItem.title = "Not logged in  \u{26a0}"
+        sessionView.setData(value: "\u{2014}", usageFrac: 0, timeFrac: 0, resetStr: "\u{2014}")
+        weeklyView.setData(value: "\u{2014}", usageFrac: 0, timeFrac: 0, resetStr: "\u{2014}")
+        sonnetView.setData(value: "\u{2014}", usageFrac: 0, timeFrac: 0, resetStr: "\u{2014}")
+        extraView.setTitle("Extra usage")
+        extraView.setData(value: "\u{2014}", usageFrac: 0, timeFrac: 0, resetStr: "\u{2014}")
+        updateAuthVisibility()
     }
 
     @objc private func toggleLaunchAtLogin() {
