@@ -25,9 +25,9 @@ Tokenio enables Launch at Login on first run — you can toggle this from the me
 
 ## Auth
 
-Tokenio uses Claude Code CLI's OAuth credentials — no separate login required. On first launch, click **Connect to Claude Code…** in the menu. macOS may prompt once to allow Tokenio to read Claude Code's keychain — after that, the imported token is stored in Tokenio's own keychain and background refreshes never touch Claude Code's credentials.
+Tokenio uses Claude Code CLI's OAuth credentials — no separate login required. On first launch, click **Connect to Claude Code…** in the menu. macOS will prompt once to allow Tokenio to read Claude Code's keychain — click **Always Allow**. The imported token is stored locally and all background refreshes run without touching Claude Code's credentials again.
 
-The imported access token expires after several hours. When it does, Tokenio keeps showing your last-known usage data and displays a **Reconnect to Claude Code…** option. Click it to import a fresh token — one prompt, done.
+The imported access token expires after several hours. When it does, Tokenio keeps showing your last-known usage data and displays a **Reconnect to Claude Code…** option. Click it to import a fresh token — one keychain prompt, done.
 
 ## Build from source
 
@@ -41,9 +41,9 @@ The built app will be in `build/Build/Products/Release/Tokenio.app`.
 
 ## How it works
 
-Tokenio reads usage data from Anthropic's OAuth usage API using Claude Code's credentials. The API is undocumented and may change without notice. Data refreshes every 5 minutes.
+Tokenio imports a Claude Code OAuth token once via an explicit Connect action (the only time it reads Claude Code's keychain). It then uses that token to fetch usage data from Anthropic's OAuth API every 5 minutes. The API is undocumented and may change without notice.
 
-Usage data is only exchanged with `api.anthropic.com`. No credentials leave your machine.
+Usage data is only exchanged with `api.anthropic.com`. The imported token is stored in the app's local preferences — no credentials leave your machine.
 
 ## Known limitations
 
