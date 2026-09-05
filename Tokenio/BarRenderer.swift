@@ -5,10 +5,11 @@ import AppKit
 private let iconW: CGFloat = 36
 private let iconH: CGFloat = 22
 private let barW: CGFloat = 31
-private let barH: CGFloat = 6
+private let barH: CGFloat = 5
 private let barX0: CGFloat = (iconW - barW) / 2
-private let sessionY: CGFloat = 13   // top bar (bottom-left origin)
-private let weeklyY: CGFloat = 3     // bottom bar (4px gap between bars)
+private let sessionY: CGFloat = 17  // top bar (bottom-left origin)
+private let weeklyY: CGFloat = 9    // middle bar (3px gap between bars)
+private let fableY: CGFloat = 1     // bottom bar
 private let barCorner: CGFloat = 2.5
 private let iconBgAlpha: CGFloat = 0.35
 
@@ -109,13 +110,16 @@ func drawBarMonochrome(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat,
 }
 
 func makeIcon(sUsage: Double, sTime: Double, wUsage: Double, wTime: Double,
-              isDark: Bool = true) -> NSImage {
+              fUsage: Double, fTime: Double, isDark: Bool = true) -> NSImage {
     let img = NSImage(size: NSSize(width: iconW, height: iconH), flipped: false) { _ in
         drawBarMonochrome(x: barX0, y: sessionY, w: barW, h: barH,
                           corner: barCorner, fillFrac: sUsage / 100, tickFrac: sTime / 100,
                           bgAlpha: iconBgAlpha, isDark: isDark)
         drawBarMonochrome(x: barX0, y: weeklyY, w: barW, h: barH,
                           corner: barCorner, fillFrac: wUsage / 100, tickFrac: wTime / 100,
+                          bgAlpha: iconBgAlpha, isDark: isDark)
+        drawBarMonochrome(x: barX0, y: fableY, w: barW, h: barH,
+                          corner: barCorner, fillFrac: fUsage / 100, tickFrac: fTime / 100,
                           bgAlpha: iconBgAlpha, isDark: isDark)
         return true
     }

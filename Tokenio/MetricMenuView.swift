@@ -1,7 +1,7 @@
 import AppKit
 
 private let menuW: CGFloat = 250
-private let menuPad: CGFloat = 24
+private let menuPad: CGFloat = 16
 private let viewH: CGFloat = 72
 
 class MetricMenuView: NSView {
@@ -57,10 +57,10 @@ class MetricMenuView: NSView {
         let valStr = NSAttributedString(string: value, attributes: [
             .font: fVal, .foregroundColor: cSec
         ])
-        valStr.draw(at: NSPoint(x: menuW - menuPad - valStr.size().width, y: 14))
+        valStr.draw(at: NSPoint(x: bounds.width - menuPad - valStr.size().width, y: 14))
 
         let bx = menuPad
-        let bw = menuW - 2 * menuPad
+        let bw = bounds.width - 2 * menuPad
         let by: CGFloat = 36
         drawBar(x: bx, y: by, w: bw, h: menuBarH,
                 corner: menuBarCorner, fillFrac: usageFrac, tickFrac: timeFrac,

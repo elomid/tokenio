@@ -11,8 +11,8 @@ struct UsageData {
     var sessionReset: TimeInterval = 0
     var weeklyPct: Double = 0
     var weeklyReset: TimeInterval = 0
-    var sonnetPct: Double = 0
-    var sonnetReset: TimeInterval = 0
+    var fablePct: Double = 0
+    var fableReset: TimeInterval = 0
     var overagePct: Double = 0
     var overageReset: TimeInterval = 0
     var extraDollars: Double = 0
@@ -101,7 +101,7 @@ func saveSnapshot(_ data: UsageData) {
     let dict: [String: Any] = [
         "sessionPct": data.sessionPct, "sessionReset": data.sessionReset,
         "weeklyPct": data.weeklyPct, "weeklyReset": data.weeklyReset,
-        "sonnetPct": data.sonnetPct, "sonnetReset": data.sonnetReset,
+        "fablePct": data.fablePct, "fableReset": data.fableReset,
         "overagePct": data.overagePct, "overageReset": data.overageReset,
         "extraDollars": data.extraDollars, "extraEnabled": data.extraEnabled,
     ]
@@ -118,8 +118,8 @@ func loadSnapshot() -> (UsageData, TimeInterval)? {
         sessionReset: dict["sessionReset"] as? Double ?? 0,
         weeklyPct: dict["weeklyPct"] as? Double ?? 0,
         weeklyReset: dict["weeklyReset"] as? Double ?? 0,
-        sonnetPct: dict["sonnetPct"] as? Double ?? 0,
-        sonnetReset: dict["sonnetReset"] as? Double ?? 0,
+        fablePct: dict["fablePct"] as? Double ?? dict["sonnetPct"] as? Double ?? 0,
+        fableReset: dict["fableReset"] as? Double ?? dict["sonnetReset"] as? Double ?? 0,
         overagePct: dict["overagePct"] as? Double ?? 0,
         overageReset: dict["overageReset"] as? Double ?? 0,
         extraDollars: dict["extraDollars"] as? Double ?? 0,
@@ -263,15 +263,16 @@ private func fetchUsageSessionKey(session: Session) -> UsageResult {
     }
 
     let usedCents = (ov["used_credits"] as? Int) ?? 0
+    let fable = fableLimit(usage)
 
     return .success(UsageData(
         sessionPct: pct(usage["five_hour"] as? [String: Any]),
         sessionReset: rst(usage["five_hour"] as? [String: Any]),
         weeklyPct: pct(usage["seven_day"] as? [String: Any]),
         weeklyReset: rst(usage["seven_day"] as? [String: Any]),
-        sonnetPct: pct(usage["seven_day_sonnet"] as? [String: Any]),
-        sonnetReset: rst(usage["seven_day_sonnet"] as? [String: Any]),
-        overagePct: (ov["utilization"] as? Double) ?? 0,
+        fablePct: fable.pct,
+        fableReset: fable.reset,
+        overagePct: num(ov["utilization"]),
         overageReset: nextMonthTs(),
         extraDollars: Double(usedCents) / 100,
         extraEnabled: (ov["is_enabled"] as? Bool) ?? false
@@ -303,8 +304,28 @@ private func parseISO(_ str: String?) -> TimeInterval {
     return f.date(from: str)?.timeIntervalSince1970 ?? 0
 }
 
+private func num(_ value: Any?) -> Double {
+    if let d = value as? Double { return d }
+    if let i = value as? Int { return Double(i) }
+    if let n = value as? NSNumber { return n.doubleValue }
+    return 0
+}
+
 private func pct(_ block: [String: Any]?) -> Double {
-    (block?["utilization"] as? Double) ?? 0
+    num(block?["utilization"])
+}
+
+private func fableLimit(_ usage: [String: Any]) -> (pct: Double, reset: TimeInterval) {
+    if let limits = usage["limits"] as? [[String: Any]] {
+        for item in limits {
+            guard (item["kind"] as? String) == "weekly_scoped" else { continue }
+            let name = ((item["scope"] as? [String: Any])?["model"] as? [String: Any])?["display_name"] as? String
+            guard name?.caseInsensitiveCompare("Fable") == .orderedSame else { continue }
+            return (num(item["percent"]), parseISO(item["resets_at"] as? String))
+        }
+    }
+    let sonnet = usage["seven_day_sonnet"] as? [String: Any]
+    return (pct(sonnet), rst(sonnet))
 }
 
 private func rst(_ block: [String: Any]?) -> TimeInterval {

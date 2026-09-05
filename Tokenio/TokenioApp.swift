@@ -14,8 +14,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var sessionView: MetricMenuView!
     private var weeklyView: MetricMenuView!
-    private var sonnetView: MetricMenuView!
+    private var fableView: MetricMenuView!
     private var extraView: MetricMenuView!
+    private var extraItem: NSMenuItem!
     private var updatedItem: NSMenuItem!
     private var loginItem: NSMenuItem!
     private var logoutItem: NSMenuItem!
@@ -32,6 +33,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Last known icon values for redraw on appearance change
     private var lastSU: Double = 0, lastST: Double = 0
     private var lastWU: Double = 0, lastWT: Double = 0
+    private var lastFU: Double = 0, lastFT: Double = 0
 
     private let refreshInterval: TimeInterval = 300 // 5 min
 
@@ -55,7 +57,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 lastFetched = ts
                 updatedItem.title = "Updated \(fmtAgo(ts))  \u{21bb}"
             } else {
-                applyIcon(makeIcon(sUsage: 0, sTime: 0, wUsage: 0, wTime: 0, isDark: isDarkMenuBar))
+                applyIcon(makeIcon(sUsage: 0, sTime: 0, wUsage: 0, wTime: 0,
+                                   fUsage: 0, fTime: 0, isDark: isDarkMenuBar))
             }
             triggerFetch(isBackground: true)
         } else {
@@ -106,13 +109,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         sessionView = MetricMenuView(title: "Current session")
         weeklyView = MetricMenuView(title: "Weekly - All models")
-        sonnetView = MetricMenuView(title: "Weekly - Sonnet only")
+        fableView = MetricMenuView(title: "Weekly - Fable")
         extraView = MetricMenuView(title: "Extra usage")
 
         addMetric(sessionView)
         addMetric(weeklyView)
-        addMetric(sonnetView)
-        addMetric(extraView)
+        addMetric(fableView)
+
+        extraItem = NSMenuItem()
+        extraItem.view = extraView
+        extraItem.isHidden = true
+        menu.addItem(extraItem)
 
         updatedItem = NSMenuItem(title: "Refreshing\u{2026}  \u{21bb}", action: #selector(refreshClicked), keyEquivalent: "")
         updatedItem.target = self
@@ -204,22 +211,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if sR > 0, sR < Date().timeIntervalSince1970 { sU = 0 }
         let sT = elapsedPct(resetTs: sR, windowSecs: 5 * 3600)
 
-        let wU = d.weeklyPct
+        var wU = d.weeklyPct
         let wR = d.weeklyReset
+        if wR > 0, wR < Date().timeIntervalSince1970 { wU = 0 }
         let wT = elapsedPct(resetTs: wR, windowSecs: 7 * 24 * 3600)
 
-        lastSU = sU; lastST = sT; lastWU = wU; lastWT = wT
-        if iconOverride {
-            applyIcon(makeIcon(sUsage: sU, sTime: sT, wUsage: wU, wTime: wT, isDark: isDarkMenuBar))
-        }
+        var fU = d.fablePct
+        let fR = d.fableReset
+        if fR > 0, fR < Date().timeIntervalSince1970 { fU = 0 }
+        let fT = elapsedPct(resetTs: fR, windowSecs: 7 * 24 * 3600)
 
-        let snU = d.sonnetPct
-        let snR = d.sonnetReset
-        let snT = elapsedPct(resetTs: snR, windowSecs: 7 * 24 * 3600)
+        lastSU = sU; lastST = sT; lastWU = wU; lastWT = wT; lastFU = fU; lastFT = fT
+        if iconOverride {
+            applyIcon(makeIcon(sUsage: sU, sTime: sT, wUsage: wU, wTime: wT,
+                               fUsage: fU, fTime: fT, isDark: isDarkMenuBar))
+        }
 
         sessionView.setData(value: "\(Int(sU))%", usageFrac: sU / 100, timeFrac: sT / 100, resetStr: "Resets in \(fmtReset(sR))")
         weeklyView.setData(value: "\(Int(wU))%", usageFrac: wU / 100, timeFrac: wT / 100, resetStr: "Resets in \(fmtReset(wR))")
-        sonnetView.setData(value: "\(Int(snU))%", usageFrac: snU / 100, timeFrac: snT / 100, resetStr: "Resets in \(fmtReset(snR))")
+        fableView.setData(value: "\(Int(fU))%", usageFrac: fU / 100, timeFrac: fT / 100, resetStr: "Resets in \(fmtReset(fR))")
 
         if d.extraEnabled {
             let oU = d.overagePct
@@ -228,9 +238,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let oT = elapsedPct(resetTs: oR, windowSecs: daysInMonth * 24 * 3600)
             extraView.setTitle("Extra usage", suffix: "$\(String(format: "%.2f", d.extraDollars))")
             extraView.setData(value: "\(Int(oU))%", usageFrac: oU / 100, timeFrac: oT / 100, resetStr: "Resets in \(fmtReset(oR))")
+            extraItem.isHidden = false
         } else {
-            extraView.setTitle("Extra usage")
-            extraView.setData(value: "Not enabled", usageFrac: 0, timeFrac: 0, resetStr: "")
+            extraItem.isHidden = true
         }
     }
 
@@ -247,7 +257,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateRelativeTime() {
         guard lastFetched > 0, !authFailed else { return }
         updatedItem.title = "Updated \(fmtAgo(lastFetched))  \u{21bb}"
-        applyIcon(makeIcon(sUsage: lastSU, sTime: lastST, wUsage: lastWU, wTime: lastWT, isDark: isDarkMenuBar))
+        applyIcon(makeIcon(sUsage: lastSU, sTime: lastST, wUsage: lastWU, wTime: lastWT,
+                           fUsage: lastFU, fTime: lastFT, isDark: isDarkMenuBar))
     }
 
     // MARK: - Actions
@@ -289,9 +300,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updatedItem.title = "Not logged in  \u{26a0}"
         sessionView.setData(value: "\u{2014}", usageFrac: 0, timeFrac: 0, resetStr: "\u{2014}")
         weeklyView.setData(value: "\u{2014}", usageFrac: 0, timeFrac: 0, resetStr: "\u{2014}")
-        sonnetView.setData(value: "\u{2014}", usageFrac: 0, timeFrac: 0, resetStr: "\u{2014}")
-        extraView.setTitle("Extra usage")
-        extraView.setData(value: "\u{2014}", usageFrac: 0, timeFrac: 0, resetStr: "\u{2014}")
+        fableView.setData(value: "\u{2014}", usageFrac: 0, timeFrac: 0, resetStr: "\u{2014}")
+        extraItem.isHidden = true
         updateAuthVisibility()
     }
 
