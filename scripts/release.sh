@@ -8,6 +8,7 @@ BUILD_DIR="build"
 ARCHIVE_PATH="$BUILD_DIR/$SCHEME.xcarchive"
 APP_PATH="$ARCHIVE_PATH/Products/Applications/$SCHEME.app"
 ZIP_PATH="$BUILD_DIR/$SCHEME-$VERSION.zip"
+STABLE_ZIP_PATH="$BUILD_DIR/$SCHEME.zip"
 
 # Load notarization credentials
 if [[ -f .env ]]; then
@@ -71,6 +72,7 @@ rm -f "$BUILD_DIR/$SCHEME-notarize.zip"
 # Package
 echo "Packaging..."
 ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
+cp "$ZIP_PATH" "$STABLE_ZIP_PATH"
 shasum -a 256 "$ZIP_PATH" | tee "$BUILD_DIR/$SCHEME-$VERSION.sha256"
 echo "Created: $ZIP_PATH ($(du -h "$ZIP_PATH" | cut -f1))"
 
@@ -81,9 +83,17 @@ echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     git tag "v$VERSION"
     git push origin "v$VERSION"
+    NOTES=$(gh api -X POST "repos/elomid/tokenio/releases/generate-notes" -f tag_name="v$VERSION" --jq .body)
     gh release create "v$VERSION" \
         --title "Tokenio $VERSION" \
-        --generate-notes \
-        "$ZIP_PATH" "$BUILD_DIR/$SCHEME-$VERSION.sha256"
+        --notes "$(cat <<EOF
+[Download Tokenio.zip](https://github.com/elomid/tokenio/releases/latest/download/Tokenio.zip)
+
+To update: quit Tokenio, replace \`Tokenio.app\` in Applications, reopen. Your login is kept.
+
+$NOTES
+EOF
+)" \
+        "$ZIP_PATH" "$STABLE_ZIP_PATH" "$BUILD_DIR/$SCHEME-$VERSION.sha256"
     echo "Released: https://github.com/elomid/tokenio/releases/tag/v$VERSION"
 fi

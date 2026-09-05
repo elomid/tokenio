@@ -17,11 +17,22 @@ The menu bar icon shows two small bars: the top bar is your current session usag
 
 ## Install
 
-Download the latest `.zip` from [Releases](https://github.com/elomid/tokenio/releases), unzip, and drag `Tokenio.app` to your Applications folder.
+**[Download the latest release](https://github.com/elomid/tokenio/releases/latest)** — get `Tokenio.zip`, unzip, and drag `Tokenio.app` to Applications.
+
+Direct link (always the newest build): https://github.com/elomid/tokenio/releases/latest/download/Tokenio.zip
 
 Requires macOS 13 (Ventura) or later. Designed for Claude Pro and Max subscribers.
 
 Tokenio enables Launch at Login on first run — you can toggle this from the menu.
+
+## Update
+
+1. Quit Tokenio (menu → Quit Tokenio).
+2. [Download the latest zip](https://github.com/elomid/tokenio/releases/latest/download/Tokenio.zip).
+3. Unzip and replace `Tokenio.app` in Applications.
+4. Reopen Tokenio. Your login is kept.
+
+To get notified when a new version ships, use **Watch → Custom → Releases** on this repo.
 
 ## Auth
 
