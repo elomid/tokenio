@@ -109,7 +109,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         sessionView = MetricMenuView(title: "Current session")
         weeklyView = MetricMenuView(title: "Weekly - All models")
-        fableView = MetricMenuView(title: "Weekly - Fable")
+        fableView = MetricMenuView(title: "Weekly - Fable", fill: fableBlue)
         extraView = MetricMenuView(title: "Extra usage")
 
         addMetric(sessionView)

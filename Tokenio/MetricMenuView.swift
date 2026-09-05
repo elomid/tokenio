@@ -11,9 +11,11 @@ class MetricMenuView: NSView {
     private var usageFrac: Double = 0
     private var timeFrac: Double = 0
     private var resetText: String = "—"
+    private var fill: NSColor?
 
-    init(title: String) {
+    init(title: String, fill: NSColor? = nil) {
         self.title = title
+        self.fill = fill
         super.init(frame: NSRect(x: 0, y: 0, width: menuW, height: viewH))
     }
 
@@ -64,7 +66,7 @@ class MetricMenuView: NSView {
         let by: CGFloat = 36
         drawBar(x: bx, y: by, w: bw, h: menuBarH,
                 corner: menuBarCorner, fillFrac: usageFrac, tickFrac: timeFrac,
-                bgAlpha: 0.30)
+                bgAlpha: 0.30, fill: fill)
 
         let resetStr = NSAttributedString(string: resetText, attributes: [
             .font: fReset, .foregroundColor: NSColor.secondaryLabelColor

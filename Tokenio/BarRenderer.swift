@@ -16,6 +16,8 @@ private let iconBgAlpha: CGFloat = 0.35
 let menuBarH: CGFloat = 7
 let menuBarCorner: CGFloat = 2.5
 
+let fableBlue = NSColor(red: 0.35, green: 0.62, blue: 1.0, alpha: 1.0)
+
 private let colorNormal: (CGFloat, CGFloat, CGFloat, CGFloat) = (0.25, 0.85, 0.35, 1.0)  // green
 private let colorWarn:   (CGFloat, CGFloat, CGFloat, CGFloat) = (1.0,  0.45, 0.10, 1.0)  // orange (≥90%)
 private let colorCrit:   (CGFloat, CGFloat, CGFloat, CGFloat) = (1.0,  0.25, 0.20, 1.0)  // red (100%)
@@ -48,11 +50,11 @@ func usageColor(usageFrac: Double) -> NSColor {
 
 func drawBar(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat,
              corner: CGFloat, fillFrac: Double, tickFrac: Double,
-             bgAlpha: CGFloat) {
+             bgAlpha: CGFloat, fill: NSColor? = nil) {
     let trackRect = NSRect(x: x, y: y, width: w, height: h)
     let trackPath = NSBezierPath(roundedRect: trackRect, xRadius: corner, yRadius: corner)
 
-    NSColor(white: 1.0, alpha: bgAlpha).setFill()
+    NSColor.labelColor.withAlphaComponent(bgAlpha).setFill()
     trackPath.fill()
 
     guard let ctx = NSGraphicsContext.current else { return }
@@ -61,7 +63,7 @@ func drawBar(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat,
     if fw > 0 {
         ctx.saveGraphicsState()
         trackPath.setClip()
-        usageColor(usageFrac: fillFrac).setFill()
+        (fill ?? NSColor.labelColor.withAlphaComponent(0.75)).setFill()
         NSRect(x: x, y: y, width: fw, height: h).fill()
         ctx.restoreGraphicsState()
     }
@@ -79,7 +81,7 @@ func drawBar(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat,
 
 func drawBarMonochrome(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat,
                        corner: CGFloat, fillFrac: Double, tickFrac: Double,
-                       bgAlpha: CGFloat, isDark: Bool) {
+                       bgAlpha: CGFloat, isDark: Bool, fill: NSColor? = nil) {
     let trackRect = NSRect(x: x, y: y, width: w, height: h)
     let trackPath = NSBezierPath(roundedRect: trackRect, xRadius: corner, yRadius: corner)
 
@@ -93,10 +95,7 @@ func drawBarMonochrome(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat,
     if fw > 0 {
         ctx.saveGraphicsState()
         trackPath.setClip()
-        let fillColor = fillFrac >= 0.9
-            ? NSColor(red: 1.0, green: 0.45, blue: 0.10, alpha: 1.0)
-            : NSColor(white: baseWhite, alpha: 0.75)
-        fillColor.setFill()
+        (fill ?? NSColor(white: baseWhite, alpha: 0.75)).setFill()
         NSRect(x: x, y: y, width: fw, height: h).fill()
         ctx.restoreGraphicsState()
     }
@@ -120,7 +119,7 @@ func makeIcon(sUsage: Double, sTime: Double, wUsage: Double, wTime: Double,
                           bgAlpha: iconBgAlpha, isDark: isDark)
         drawBarMonochrome(x: barX0, y: fableY, w: barW, h: barH,
                           corner: barCorner, fillFrac: fUsage / 100, tickFrac: fTime / 100,
-                          bgAlpha: iconBgAlpha, isDark: isDark)
+                          bgAlpha: iconBgAlpha, isDark: isDark, fill: fableBlue)
         return true
     }
     img.isTemplate = false
