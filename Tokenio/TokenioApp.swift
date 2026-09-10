@@ -15,6 +15,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var sessionView: MetricMenuView!
     private var weeklyView: MetricMenuView!
     private var fableView: MetricMenuView!
+    private var fableItem: NSMenuItem!
     private var extraView: MetricMenuView!
     private var extraItem: NSMenuItem!
     private var updatedItem: NSMenuItem!
@@ -34,6 +35,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastSU: Double = 0, lastST: Double = 0
     private var lastWU: Double = 0, lastWT: Double = 0
     private var lastFU: Double = 0, lastFT: Double = 0
+    private var lastShowFable = false
 
     private let refreshInterval: TimeInterval = 300 // 5 min
 
@@ -57,8 +59,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 lastFetched = ts
                 updatedItem.title = "Updated \(fmtAgo(ts))  \u{21bb}"
             } else {
-                applyIcon(makeIcon(sUsage: 0, sTime: 0, wUsage: 0, wTime: 0,
-                                   fUsage: 0, fTime: 0, isDark: isDarkMenuBar))
+                applyIcon(makeIcon(sUsage: 0, sTime: 0, wUsage: 0, wTime: 0, isDark: isDarkMenuBar))
             }
             triggerFetch(isBackground: true)
         } else {
@@ -114,7 +115,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         addMetric(sessionView)
         addMetric(weeklyView)
-        addMetric(fableView)
+
+        fableItem = NSMenuItem()
+        fableItem.view = fableView
+        fableItem.isHidden = true
+        menu.addItem(fableItem)
 
         extraItem = NSMenuItem()
         extraItem.view = extraView
@@ -221,15 +226,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if fR > 0, fR < Date().timeIntervalSince1970 { fU = 0 }
         let fT = elapsedPct(resetTs: fR, windowSecs: 7 * 24 * 3600)
 
-        lastSU = sU; lastST = sT; lastWU = wU; lastWT = wT; lastFU = fU; lastFT = fT
+        lastSU = sU; lastST = sT; lastWU = wU; lastWT = wT
+        lastFU = fU; lastFT = fT; lastShowFable = d.fableEnabled
         if iconOverride {
             applyIcon(makeIcon(sUsage: sU, sTime: sT, wUsage: wU, wTime: wT,
-                               fUsage: fU, fTime: fT, isDark: isDarkMenuBar))
+                               fUsage: fU, fTime: fT, showFable: d.fableEnabled,
+                               isDark: isDarkMenuBar))
         }
 
         sessionView.setData(value: "\(Int(sU))%", usageFrac: sU / 100, timeFrac: sT / 100, resetStr: "Resets in \(fmtReset(sR))")
         weeklyView.setData(value: "\(Int(wU))%", usageFrac: wU / 100, timeFrac: wT / 100, resetStr: "Resets in \(fmtReset(wR))")
-        fableView.setData(value: "\(Int(fU))%", usageFrac: fU / 100, timeFrac: fT / 100, resetStr: "Resets in \(fmtReset(fR))")
+        if d.fableEnabled {
+            fableView.setData(value: "\(Int(fU))%", usageFrac: fU / 100, timeFrac: fT / 100, resetStr: "Resets in \(fmtReset(fR))")
+            fableItem.isHidden = false
+        } else {
+            fableItem.isHidden = true
+        }
 
         if d.extraEnabled {
             let oU = d.overagePct
@@ -258,7 +270,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard lastFetched > 0, !authFailed else { return }
         updatedItem.title = "Updated \(fmtAgo(lastFetched))  \u{21bb}"
         applyIcon(makeIcon(sUsage: lastSU, sTime: lastST, wUsage: lastWU, wTime: lastWT,
-                           fUsage: lastFU, fTime: lastFT, isDark: isDarkMenuBar))
+                           fUsage: lastFU, fTime: lastFT, showFable: lastShowFable,
+                           isDark: isDarkMenuBar))
     }
 
     // MARK: - Actions
@@ -300,7 +313,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updatedItem.title = "Not logged in  \u{26a0}"
         sessionView.setData(value: "\u{2014}", usageFrac: 0, timeFrac: 0, resetStr: "\u{2014}")
         weeklyView.setData(value: "\u{2014}", usageFrac: 0, timeFrac: 0, resetStr: "\u{2014}")
-        fableView.setData(value: "\u{2014}", usageFrac: 0, timeFrac: 0, resetStr: "\u{2014}")
+        fableItem.isHidden = true
         extraItem.isHidden = true
         updateAuthVisibility()
     }

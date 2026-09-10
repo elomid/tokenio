@@ -109,17 +109,27 @@ func drawBarMonochrome(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat,
 }
 
 func makeIcon(sUsage: Double, sTime: Double, wUsage: Double, wTime: Double,
-              fUsage: Double, fTime: Double, isDark: Bool = true) -> NSImage {
+              fUsage: Double = 0, fTime: Double = 0, showFable: Bool = false,
+              isDark: Bool = true) -> NSImage {
     let img = NSImage(size: NSSize(width: iconW, height: iconH), flipped: false) { _ in
-        drawBarMonochrome(x: barX0, y: sessionY, w: barW, h: barH,
-                          corner: barCorner, fillFrac: sUsage / 100, tickFrac: sTime / 100,
-                          bgAlpha: iconBgAlpha, isDark: isDark)
-        drawBarMonochrome(x: barX0, y: weeklyY, w: barW, h: barH,
-                          corner: barCorner, fillFrac: wUsage / 100, tickFrac: wTime / 100,
-                          bgAlpha: iconBgAlpha, isDark: isDark)
-        drawBarMonochrome(x: barX0, y: fableY, w: barW, h: barH,
-                          corner: barCorner, fillFrac: fUsage / 100, tickFrac: fTime / 100,
-                          bgAlpha: iconBgAlpha, isDark: isDark, fill: fableBlue)
+        if showFable {
+            drawBarMonochrome(x: barX0, y: sessionY, w: barW, h: barH,
+                              corner: barCorner, fillFrac: sUsage / 100, tickFrac: sTime / 100,
+                              bgAlpha: iconBgAlpha, isDark: isDark)
+            drawBarMonochrome(x: barX0, y: weeklyY, w: barW, h: barH,
+                              corner: barCorner, fillFrac: wUsage / 100, tickFrac: wTime / 100,
+                              bgAlpha: iconBgAlpha, isDark: isDark)
+            drawBarMonochrome(x: barX0, y: fableY, w: barW, h: barH,
+                              corner: barCorner, fillFrac: fUsage / 100, tickFrac: fTime / 100,
+                              bgAlpha: iconBgAlpha, isDark: isDark, fill: fableBlue)
+        } else {
+            drawBarMonochrome(x: barX0, y: 13, w: barW, h: 6,
+                              corner: barCorner, fillFrac: sUsage / 100, tickFrac: sTime / 100,
+                              bgAlpha: iconBgAlpha, isDark: isDark)
+            drawBarMonochrome(x: barX0, y: 3, w: barW, h: 6,
+                              corner: barCorner, fillFrac: wUsage / 100, tickFrac: wTime / 100,
+                              bgAlpha: iconBgAlpha, isDark: isDark)
+        }
         return true
     }
     img.isTemplate = false

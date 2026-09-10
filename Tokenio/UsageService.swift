@@ -13,6 +13,7 @@ struct UsageData {
     var weeklyReset: TimeInterval = 0
     var fablePct: Double = 0
     var fableReset: TimeInterval = 0
+    var fableEnabled: Bool = false
     var overagePct: Double = 0
     var overageReset: TimeInterval = 0
     var extraDollars: Double = 0
@@ -102,6 +103,7 @@ func saveSnapshot(_ data: UsageData) {
         "sessionPct": data.sessionPct, "sessionReset": data.sessionReset,
         "weeklyPct": data.weeklyPct, "weeklyReset": data.weeklyReset,
         "fablePct": data.fablePct, "fableReset": data.fableReset,
+        "fableEnabled": data.fableEnabled,
         "overagePct": data.overagePct, "overageReset": data.overageReset,
         "extraDollars": data.extraDollars, "extraEnabled": data.extraEnabled,
     ]
@@ -120,6 +122,7 @@ func loadSnapshot() -> (UsageData, TimeInterval)? {
         weeklyReset: dict["weeklyReset"] as? Double ?? 0,
         fablePct: dict["fablePct"] as? Double ?? dict["sonnetPct"] as? Double ?? 0,
         fableReset: dict["fableReset"] as? Double ?? dict["sonnetReset"] as? Double ?? 0,
+        fableEnabled: dict["fableEnabled"] as? Bool ?? ((dict["fableReset"] as? Double ?? dict["sonnetReset"] as? Double ?? 0) > 0),
         overagePct: dict["overagePct"] as? Double ?? 0,
         overageReset: dict["overageReset"] as? Double ?? 0,
         extraDollars: dict["extraDollars"] as? Double ?? 0,
@@ -272,6 +275,7 @@ private func fetchUsageSessionKey(session: Session) -> UsageResult {
         weeklyReset: rst(usage["seven_day"] as? [String: Any]),
         fablePct: fable.pct,
         fableReset: fable.reset,
+        fableEnabled: fable.enabled,
         overagePct: num(ov["utilization"]),
         overageReset: nextMonthTs(),
         extraDollars: Double(usedCents) / 100,
@@ -315,17 +319,19 @@ private func pct(_ block: [String: Any]?) -> Double {
     num(block?["utilization"])
 }
 
-private func fableLimit(_ usage: [String: Any]) -> (pct: Double, reset: TimeInterval) {
+private func fableLimit(_ usage: [String: Any]) -> (pct: Double, reset: TimeInterval, enabled: Bool) {
     if let limits = usage["limits"] as? [[String: Any]] {
         for item in limits {
             guard (item["kind"] as? String) == "weekly_scoped" else { continue }
             let name = ((item["scope"] as? [String: Any])?["model"] as? [String: Any])?["display_name"] as? String
             guard name?.caseInsensitiveCompare("Fable") == .orderedSame else { continue }
-            return (num(item["percent"]), parseISO(item["resets_at"] as? String))
+            return (num(item["percent"]), parseISO(item["resets_at"] as? String), true)
         }
     }
-    let sonnet = usage["seven_day_sonnet"] as? [String: Any]
-    return (pct(sonnet), rst(sonnet))
+    if let sonnet = usage["seven_day_sonnet"] as? [String: Any] {
+        return (pct(sonnet), rst(sonnet), true)
+    }
+    return (0, 0, false)
 }
 
 private func rst(_ block: [String: Any]?) -> TimeInterval {
