@@ -16,6 +16,8 @@ private let iconBgAlpha: CGFloat = 0.35
 let menuBarH: CGFloat = 7
 let menuBarCorner: CGFloat = 2.5
 
+let codexPurple = NSColor(red: 0.72, green: 0.48, blue: 1.0, alpha: 1.0)
+
 let fableBlue = NSColor(red: 0.35, green: 0.62, blue: 1.0, alpha: 1.0)
 
 private let colorNormal: (CGFloat, CGFloat, CGFloat, CGFloat) = (0.25, 0.85, 0.35, 1.0)  // green
@@ -110,25 +112,16 @@ func drawBarMonochrome(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat,
 
 func makeIcon(sUsage: Double, sTime: Double, wUsage: Double, wTime: Double,
               fUsage: Double = 0, fTime: Double = 0, showFable: Bool = false,
-              isDark: Bool = true) -> NSImage {
+              isDark: Bool = true, cUsage: Double = 0, cTime: Double = 0) -> NSImage {
     let img = NSImage(size: NSSize(width: iconW, height: iconH), flipped: false) { _ in
-        if showFable {
-            drawBarMonochrome(x: barX0, y: sessionY, w: barW, h: barH,
-                              corner: barCorner, fillFrac: sUsage / 100, tickFrac: sTime / 100,
-                              bgAlpha: iconBgAlpha, isDark: isDark)
-            drawBarMonochrome(x: barX0, y: weeklyY, w: barW, h: barH,
-                              corner: barCorner, fillFrac: wUsage / 100, tickFrac: wTime / 100,
-                              bgAlpha: iconBgAlpha, isDark: isDark)
-            drawBarMonochrome(x: barX0, y: fableY, w: barW, h: barH,
-                              corner: barCorner, fillFrac: fUsage / 100, tickFrac: fTime / 100,
-                              bgAlpha: iconBgAlpha, isDark: isDark, fill: fableBlue)
-        } else {
-            drawBarMonochrome(x: barX0, y: 13, w: barW, h: 6,
-                              corner: barCorner, fillFrac: sUsage / 100, tickFrac: sTime / 100,
-                              bgAlpha: iconBgAlpha, isDark: isDark)
-            drawBarMonochrome(x: barX0, y: 3, w: barW, h: 6,
-                              corner: barCorner, fillFrac: wUsage / 100, tickFrac: wTime / 100,
-                              bgAlpha: iconBgAlpha, isDark: isDark)
+        let bars: [(Double, Double, NSColor?)] = [
+            (sUsage, sTime, nil), (wUsage, wTime, nil),
+            (fUsage, fTime, fableBlue), (cUsage, cTime, codexPurple)
+        ]
+        for (index, bar) in bars.enumerated() {
+            drawBarMonochrome(x: barX0, y: CGFloat(18 - index * 6), w: barW, h: 4,
+                              corner: 2, fillFrac: bar.0 / 100, tickFrac: bar.1 / 100,
+                              bgAlpha: iconBgAlpha, isDark: isDark, fill: bar.2)
         }
         return true
     }

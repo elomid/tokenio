@@ -11,6 +11,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         app.run()
     }
 
+    private var codexView: MetricMenuView!
+    private var codexUpdatedItem: NSMenuItem!
+    private var codexUsage = CodexUsage.cached
+    private var codexLoading = false
+    private var codexError: String?
+    private var claudeSnapshot: UsageData?
+    private var claudeError: String?
     private var statusItem: NSStatusItem!
     private var sessionView: MetricMenuView!
     private var weeklyView: MetricMenuView!
@@ -51,6 +58,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         buildMenu()
+        triggerCodexFetch()
 
         if loadSession() != nil {
             // Logged in — show snapshot immediately if available, then refresh
@@ -59,12 +67,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 lastFetched = ts
                 updatedItem.title = "Updated \(fmtAgo(ts))  \u{21bb}"
             } else {
-                applyIcon(makeIcon(sUsage: 0, sTime: 0, wUsage: 0, wTime: 0, isDark: isDarkMenuBar))
+                updateIcon()
             }
             triggerFetch(isBackground: true)
         } else {
             // Not logged in — warning icon, show stale data if any
-            applyIcon(makeDisconnectedIcon())
+            updateIcon()
             if let (snapshot, ts) = loadSnapshot() {
                 applySnapshot(snapshot, iconOverride: false)
                 lastFetched = ts
@@ -82,6 +90,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         fetchTimer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
             self?.triggerFetch(isBackground: true)
+            self?.triggerCodexFetch()
         }
         RunLoop.main.add(fetchTimer!, forMode: .common)
 
@@ -108,6 +117,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(item)
         }
 
+        func addSection(_ title: String) {
+            let item = NSMenuItem()
+            item.view = SectionHeaderView(title: title)
+            menu.addItem(item)
+        }
+
+        addSection("Claude")
         sessionView = MetricMenuView(title: "Current session")
         weeklyView = MetricMenuView(title: "Weekly - All models")
         fableView = MetricMenuView(title: "Weekly - Fable", fill: fableBlue)
@@ -130,6 +146,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         updatedItem.target = self
         menu.addItem(updatedItem)
 
+        menu.addItem(.separator())
+        addSection("Codex")
+        codexView = MetricMenuView(title: "Weekly", fill: codexPurple)
+        addMetric(codexView)
+        codexUpdatedItem = NSMenuItem(title: "Refreshing…", action: #selector(refreshClicked), keyEquivalent: "")
+        codexUpdatedItem.target = self
+        menu.addItem(codexUpdatedItem)
         menu.addItem(.separator())
 
         loginItem = NSMenuItem(title: "Log in to Claude\u{2026}", action: #selector(loginClicked), keyEquivalent: "")
@@ -166,8 +189,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.button?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
     }
 
-    private func applyIcon(_ img: NSImage) {
-        statusItem.button?.image = img
+    private func updateIcon() {
+        // Keep Codex visible even when Claude is disconnected.
+        statusItem.button?.image = makeIcon(
+            sUsage: lastSU, sTime: lastST, wUsage: lastWU, wTime: lastWT,
+            fUsage: lastFU, fTime: lastFT, showFable: lastShowFable,
+            isDark: isDarkMenuBar, cUsage: codexUsage?.usedPercent ?? 0,
+            cTime: codexUsage.map { elapsedPct(resetTs: $0.resetsAt, windowSecs: $0.windowDurationMins * 60) } ?? 0)
+        statusItem.button?.toolTip = "Claude: session, weekly, Fable (blue) · Codex: weekly (purple)"
         statusItem.button?.imageScaling = .scaleProportionallyDown
     }
 
@@ -188,6 +217,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         switch result {
         case .success(let d):
+            claudeError = nil
             applySnapshot(d)
             lastFetched = Date().timeIntervalSince1970
             authFailed = false
@@ -196,7 +226,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         case .needsLogin:
             authFailed = true
-            applyIcon(makeDisconnectedIcon())
+            updateIcon()
             if lastFetched > 0 {
                 updatedItem.title = "Session expired (\(fmtAgo(lastFetched)))  \u{26a0}"
             } else {
@@ -205,12 +235,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             updateAuthVisibility()
 
         case .error(let msg):
+            claudeError = msg
             let short = msg.count > 40 ? String(msg.prefix(40)) + "\u{2026}" : msg
             updatedItem.title = "\(short)  \u{26a0}"
         }
     }
 
     private func applySnapshot(_ d: UsageData, iconOverride: Bool = true) {
+        claudeSnapshot = d
         var sU = d.sessionPct
         let sR = d.sessionReset
         if sR > 0, sR < Date().timeIntervalSince1970 { sU = 0 }
@@ -229,9 +261,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         lastSU = sU; lastST = sT; lastWU = wU; lastWT = wT
         lastFU = fU; lastFT = fT; lastShowFable = d.fableEnabled
         if iconOverride {
-            applyIcon(makeIcon(sUsage: sU, sTime: sT, wUsage: wU, wTime: wT,
-                               fUsage: fU, fTime: fT, showFable: d.fableEnabled,
-                               isDark: isDarkMenuBar))
+            updateIcon()
         }
 
         sessionView.setData(value: "\(Int(sU))%", usageFrac: sU / 100, timeFrac: sT / 100, resetStr: "Resets in \(fmtReset(sR))")
@@ -267,18 +297,46 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Relative time
 
     private func updateRelativeTime() {
-        guard lastFetched > 0, !authFailed else { return }
-        updatedItem.title = "Updated \(fmtAgo(lastFetched))  \u{21bb}"
-        applyIcon(makeIcon(sUsage: lastSU, sTime: lastST, wUsage: lastWU, wTime: lastWT,
-                           fUsage: lastFU, fTime: lastFT, showFable: lastShowFable,
-                           isDark: isDarkMenuBar))
+        if let snapshot = claudeSnapshot { applySnapshot(snapshot) }
+        if lastFetched > 0, !authFailed, claudeError == nil {
+            updatedItem.title = "Updated \(fmtAgo(lastFetched))  ↻"
+        }
+        if let usage = codexUsage {
+            codexView.setData(value: "\(Int(usage.usedPercent))%", usageFrac: usage.usedPercent / 100,
+                              timeFrac: elapsedPct(resetTs: usage.resetsAt, windowSecs: usage.windowDurationMins * 60) / 100,
+                              resetStr: "Resets in \(fmtReset(usage.resetsAt))")
+            codexUpdatedItem.title = codexError ?? "Updated \(fmtAgo(usage.fetchedAt))  ↻"
+        } else {
+            codexUpdatedItem.title = codexError ?? "Refreshing…"
+        }
+        updateIcon()
+    }
+
+    private func triggerCodexFetch() {
+        guard !codexLoading else { return }
+        codexLoading = true
+        DispatchQueue.global().async { [weak self] in
+            let result = Result { try CodexUsage.fetch() }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.codexLoading = false
+                switch result {
+                case .success(let usage):
+                    self.codexUsage = usage
+                    self.codexError = nil
+                case .failure(let error):
+                    self.codexError = error.localizedDescription
+                }
+                self.updateRelativeTime()
+            }
+        }
     }
 
     // MARK: - Actions
 
-    @objc private func refreshClicked() { triggerFetch(isBackground: false) }
+    @objc private func refreshClicked() { triggerFetch(isBackground: false); triggerCodexFetch() }
 
-    @objc private func wakeRefresh() { triggerFetch(isBackground: true) }
+    @objc private func wakeRefresh() { triggerFetch(isBackground: true); triggerCodexFetch() }
 
     private func showWelcome() {
         welcomeWindow = WelcomeWindow(onLogin: { [weak self] in
@@ -307,9 +365,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func logoutClicked() {
         clearSession()
         clearSnapshot()
+        claudeSnapshot = nil
+        lastSU = 0; lastST = 0; lastWU = 0; lastWT = 0; lastFU = 0; lastFT = 0
         authFailed = true
         lastFetched = 0
-        applyIcon(makeDisconnectedIcon())
+        updateIcon()
         updatedItem.title = "Not logged in  \u{26a0}"
         sessionView.setData(value: "\u{2014}", usageFrac: 0, timeFrac: 0, resetStr: "\u{2014}")
         weeklyView.setData(value: "\u{2014}", usageFrac: 0, timeFrac: 0, resetStr: "\u{2014}")

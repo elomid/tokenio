@@ -75,3 +75,22 @@ class MetricMenuView: NSView {
     }
 }
 
+
+final class SectionHeaderView: NSView {
+    private let title: String
+
+    init(title: String) {
+        self.title = title
+        super.init(frame: NSRect(x: 0, y: 0, width: menuW, height: 30))
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSAttributedString(string: title, attributes: [
+            .font: NSFont.systemFont(ofSize: 13, weight: .bold),
+            .foregroundColor: NSColor.labelColor,
+        ]).draw(at: NSPoint(x: menuPad, y: 7))
+    }
+}

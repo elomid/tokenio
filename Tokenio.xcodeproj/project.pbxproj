@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        A10010 = {isa = PBXBuildFile; fileRef = A20010; };
 		A10001 /* TokenioApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001; };
 		A10002 /* BarRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20002; };
 		A10003 /* MetricMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20003; };
@@ -17,6 +18,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+        A20010 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexUsage.swift; sourceTree = "<group>"; };
 		A20001 /* TokenioApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenioApp.swift; sourceTree = "<group>"; };
 		A20002 /* BarRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarRenderer.swift; sourceTree = "<group>"; };
 		A20003 /* MetricMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricMenuView.swift; sourceTree = "<group>"; };
@@ -63,6 +65,7 @@
 				A20002 /* BarRenderer.swift */,
 				A20003 /* MetricMenuView.swift */,
 				A20004 /* UsageService.swift */,
+                A20010 /* CodexUsage.swift */,
 				A20005 /* LoginWindow.swift */,
 				A20009 /* WelcomeWindow.swift */,
 				A20006 /* Info.plist */,
@@ -137,6 +140,7 @@
 				A10002 /* BarRenderer.swift in Sources */,
 				A10003 /* MetricMenuView.swift in Sources */,
 				A10004 /* UsageService.swift in Sources */,
+                A10010 /* CodexUsage.swift in Sources */,
 				A10005 /* LoginWindow.swift in Sources */,
 				A10007 /* WelcomeWindow.swift in Sources */,
 			);

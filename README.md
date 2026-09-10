@@ -1,6 +1,6 @@
 # Tokenio
 
-Tiny macOS menu bar app that shows your Claude AI usage at a glance.
+Tiny macOS menu bar app that shows your Claude and Codex usage at a glance.
 
 ![Menu bar and popup](docs/screenshot.png)
 
@@ -8,12 +8,13 @@ Tiny macOS menu bar app that shows your Claude AI usage at a glance.
 
 - **Current session** (5-hour window) — usage % with pace indicator
 - **Weekly — All models** (7-day window)
-- **Weekly — Sonnet only** (7-day window)
+- **Weekly — Fable only** (7-day window)
+- **Codex weekly** — purple bar, using your existing Codex login
 - **Extra usage** — dollar amount and utilization
 
-Each bar is color-coded: **green** = normal, **orange** = near limit (≥90%), **red** = at limit. The transparent notch shows where you are in the time window.
+Claude session and overall weekly bars are monochrome, Fable is blue, and Codex is purple. The transparent notch shows where you are in the time window.
 
-The menu bar icon shows two small bars: the top bar is your current session usage, and the bottom bar is your weekly usage.
+The menu bar icon shows four stacked bars: Claude session, Claude weekly, Fable weekly (blue), and Codex weekly (purple). Menu bars use matching colors. An unavailable metric has an empty bar; check the menu for connection errors.
 
 ## Install
 
@@ -38,7 +39,7 @@ To get notified when a new version ships, use **Watch → Custom → Releases** 
 
 On first launch, Tokenio shows a welcome screen. Click **Log in to Claude** to sign in with your Claude account via email verification. Google sign-in is not supported — use "Continue with email" instead.
 
-Your session is stored locally and persists across restarts. No keychain prompts, no CLI required.
+Your session is stored locally and persists across restarts. Claude does not require a CLI; Codex setup is described below.
 
 ## Build from source
 
@@ -54,7 +55,7 @@ The built app will be in `build/Build/Products/Release/Tokenio.app`.
 
 Tokenio signs you in via claude.ai and stores a session key locally. It then fetches usage data from Claude's API every 5 minutes. The API is undocumented and may change without notice.
 
-Usage data is only exchanged with `claude.ai`. Your session key is stored in your macOS keychain under Tokenio's own entry — no credentials leave your machine.
+Claude usage is fetched from `claude.ai`, with its session key stored in Tokenio’s own macOS Keychain entry. Codex usage is fetched by the local Codex CLI using its existing authentication.
 
 ## Known limitations
 
@@ -65,3 +66,7 @@ Usage data is only exchanged with `claude.ai`. Your session key is stored in you
 ## License
 
 MIT
+
+## Codex setup
+
+Install the Codex CLI and sign in with `codex login`. Tokenio reads the main Codex weekly quota through `codex app-server`, independently of Claude, every five minutes and on wake or manual refresh. It does not start a model turn. The CLI manages authentication. Last successful usage is cached; fetch errors remain visible in the menu.
