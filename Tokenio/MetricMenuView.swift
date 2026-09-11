@@ -17,6 +17,7 @@ class MetricMenuView: NSView {
         self.title = title
         self.fill = fill
         super.init(frame: NSRect(x: 0, y: 0, width: menuW, height: viewH))
+        autoresizingMask = [.width]
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -82,6 +83,7 @@ final class SectionHeaderView: NSView {
     init(title: String) {
         self.title = title
         super.init(frame: NSRect(x: 0, y: 0, width: menuW, height: 30))
+        autoresizingMask = [.width]
     }
 
     required init?(coder: NSCoder) { fatalError() }

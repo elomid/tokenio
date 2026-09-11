@@ -111,15 +111,23 @@ func drawBarMonochrome(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat,
 }
 
 func makeIcon(sUsage: Double, sTime: Double, wUsage: Double, wTime: Double,
-              fUsage: Double = 0, fTime: Double = 0, showFable: Bool = false,
+              fUsage: Double = 0, fTime: Double = 0, showFable: Bool = false, showClaude: Bool = true, showCodex: Bool = true,
               isDark: Bool = true, cUsage: Double = 0, cTime: Double = 0) -> NSImage {
+    var bars: [(Double, Double, NSColor?)] = []
+    if showClaude {
+        bars += [(sUsage, sTime, nil), (wUsage, wTime, nil)]
+        if showFable { bars.append((fUsage, fTime, fableBlue)) }
+    }
+    if showCodex { bars.append((cUsage, cTime, codexPurple)) }
+    guard !bars.isEmpty else {
+        let image = NSImage(systemSymbolName: "chart.bar", accessibilityDescription: "Choose a provider") ?? NSImage()
+        image.isTemplate = true
+        return image
+    }
     let img = NSImage(size: NSSize(width: iconW, height: iconH), flipped: false) { _ in
-        let bars: [(Double, Double, NSColor?)] = [
-            (sUsage, sTime, nil), (wUsage, wTime, nil),
-            (fUsage, fTime, fableBlue), (cUsage, cTime, codexPurple)
-        ]
+        let top = (iconH + CGFloat(bars.count - 1) * 6 - 4) / 2
         for (index, bar) in bars.enumerated() {
-            drawBarMonochrome(x: barX0, y: CGFloat(18 - index * 6), w: barW, h: 4,
+            drawBarMonochrome(x: barX0, y: top - CGFloat(index * 6), w: barW, h: 4,
                               corner: 2, fillFrac: bar.0 / 100, tickFrac: bar.1 / 100,
                               bgAlpha: iconBgAlpha, isDark: isDark, fill: bar.2)
         }

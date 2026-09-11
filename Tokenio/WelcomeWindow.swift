@@ -3,14 +3,16 @@ import AppKit
 class WelcomeWindow {
     private var window: NSWindow?
     private var onLogin: (() -> Void)?
+    private var onCodex: (() -> Void)?
 
-    init(onLogin: @escaping () -> Void) {
+    init(onLogin: @escaping () -> Void, onCodex: @escaping () -> Void) {
+        self.onCodex = onCodex
         self.onLogin = onLogin
     }
 
     func show() {
         let w: CGFloat = 320
-        let h: CGFloat = 320
+        let h: CGFloat = 410
 
         let content = NSView(frame: NSRect(x: 0, y: 0, width: w, height: h))
 
@@ -29,7 +31,7 @@ class WelcomeWindow {
         content.addSubview(title)
 
         // Subtitle
-        let subtitle = NSTextField(labelWithString: "Track your Claude usage\nright from the menu bar.")
+        let subtitle = NSTextField(labelWithString: "Track Claude, Codex, or both\nright from the menu bar.")
         subtitle.font = .systemFont(ofSize: 13)
         subtitle.textColor = .secondaryLabelColor
         subtitle.alignment = .center
@@ -38,7 +40,7 @@ class WelcomeWindow {
         content.addSubview(subtitle)
 
         // Hint
-        let hint = NSTextField(labelWithString: "Use \u{201c}Continue with email\u{201d} to log in.\nGoogle sign-in is not supported.")
+        let hint = NSTextField(labelWithString: "Choose either provider to start.\nChange this anytime in Providers.")
         hint.font = .systemFont(ofSize: 11)
         hint.textColor = .tertiaryLabelColor
         hint.alignment = .center
@@ -53,6 +55,17 @@ class WelcomeWindow {
         button.keyEquivalent = "\r"
         button.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(button)
+
+        let codexButton = NSButton(title: "Use Codex", target: self, action: #selector(codexClicked))
+        codexButton.bezelStyle = .rounded
+        codexButton.controlSize = .large
+        codexButton.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(codexButton)
+        let codexHint = NSTextField(labelWithString: "Uses your existing Codex CLI login.")
+        codexHint.font = .systemFont(ofSize: 11)
+        codexHint.textColor = .secondaryLabelColor
+        codexHint.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(codexHint)
 
         NSLayoutConstraint.activate([
             icon.centerXAnchor.constraint(equalTo: content.centerXAnchor),
@@ -71,7 +84,12 @@ class WelcomeWindow {
             button.widthAnchor.constraint(equalToConstant: 180),
 
             hint.centerXAnchor.constraint(equalTo: content.centerXAnchor),
-            hint.topAnchor.constraint(equalTo: button.bottomAnchor, constant: 16),
+            codexButton.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+            codexButton.topAnchor.constraint(equalTo: button.bottomAnchor, constant: 8),
+            codexButton.widthAnchor.constraint(equalToConstant: 180),
+            codexHint.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+            codexHint.topAnchor.constraint(equalTo: codexButton.bottomAnchor, constant: 6),
+            hint.topAnchor.constraint(equalTo: codexHint.bottomAnchor, constant: 20),
         ])
 
         let win = NSWindow(
@@ -100,6 +118,11 @@ class WelcomeWindow {
     @objc private func loginClicked() {
         close()
         onLogin?()
+    }
+
+    @objc private func codexClicked() {
+        close()
+        onCodex?()
     }
 
     func close() {

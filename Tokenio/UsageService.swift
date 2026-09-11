@@ -283,16 +283,13 @@ private func fetchUsageSessionKey(session: Session) -> UsageResult {
     ))
 }
 
-func fetchUsage() -> UsageResult {
-    guard let session = loadSession() else { return .needsLogin }
+func fetchUsage(session: Session) -> UsageResult {
     let result = fetchUsageSessionKey(session: session)
-    if case .success(let data) = result {
+    if case .success = result {
         log.info("Fetched usage via session key")
-        saveSnapshot(data)
     }
     if case .needsLogin = result {
-        log.info("Session expired, clearing")
-        clearSession()
+        log.info("Session expired")
     }
     return result
 }

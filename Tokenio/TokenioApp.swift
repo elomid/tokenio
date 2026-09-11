@@ -2,7 +2,7 @@ import AppKit
 import ServiceManagement
 
 @main
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     static func main() {
         let app = NSApplication.shared
@@ -11,6 +11,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         app.run()
     }
 
+    private var claudeEnabled = UserDefaults.standard.object(forKey: "claudeEnabled") as? Bool ?? (loadSession() != nil)
+    private var codexEnabled = UserDefaults.standard.object(forKey: "codexEnabled") as? Bool ?? (CodexUsage.cached != nil)
+    private var claudeItems: [NSMenuItem] = []
+    private var codexItems: [NSMenuItem] = []
+    private var providerSeparator: NSMenuItem!
+    private var usageSeparator: NSMenuItem!
+    private var emptyItem: NSMenuItem!
+    private var claudeToggle: NSMenuItem!
+    private var codexToggle: NSMenuItem!
+    private var claudeGeneration = 0
     private var codexView: MetricMenuView!
     private var codexUpdatedItem: NSMenuItem!
     private var codexUsage = CodexUsage.cached
@@ -60,7 +70,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         buildMenu()
         triggerCodexFetch()
 
-        if loadSession() != nil {
+        if claudeEnabled, loadSession() != nil {
             // Logged in — show snapshot immediately if available, then refresh
             if let (snapshot, ts) = loadSnapshot() {
                 applySnapshot(snapshot)
@@ -71,21 +81,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             triggerFetch(isBackground: true)
         } else {
-            // Not logged in — warning icon, show stale data if any
-            updateIcon()
-            if let (snapshot, ts) = loadSnapshot() {
-                applySnapshot(snapshot, iconOverride: false)
-                lastFetched = ts
-                updatedItem.title = "Not logged in  \u{26a0}"
-            } else {
-                updatedItem.title = "Not logged in  \u{26a0}"
-            }
-            authFailed = true
-            updateAuthVisibility()
-            // Show welcome window on first launch
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.showWelcome()
-            }
+            authFailed = loadSession() == nil
+            updatedItem.title = "Sign in to Claude…"
+        }
+        updateAuthVisibility()
+        updateRelativeTime()
+        if !claudeEnabled && !codexEnabled && !UserDefaults.standard.bool(forKey: "providerWelcomeShown") {
+            UserDefaults.standard.set(true, forKey: "providerWelcomeShown")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.showWelcome() }
         }
 
         fetchTimer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
@@ -110,6 +113,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func buildMenu() {
         let menu = NSMenu()
         menu.autoenablesItems = false
+        menu.delegate = self
+        menu.minimumWidth = 250
 
         func addMetric(_ view: MetricMenuView) {
             let item = NSMenuItem()
@@ -142,24 +147,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         extraItem.isHidden = true
         menu.addItem(extraItem)
 
-        updatedItem = NSMenuItem(title: "Refreshing\u{2026}  \u{21bb}", action: #selector(refreshClicked), keyEquivalent: "")
+        updatedItem = NSMenuItem(title: "Refreshing\u{2026}  \u{21bb}", action: #selector(claudeStatusClicked), keyEquivalent: "")
         updatedItem.target = self
         menu.addItem(updatedItem)
 
-        menu.addItem(.separator())
+        claudeItems = menu.items
+        providerSeparator = .separator()
+        menu.addItem(providerSeparator)
+        let codexStart = menu.items.count
         addSection("Codex")
         codexView = MetricMenuView(title: "Weekly", fill: codexPurple)
         addMetric(codexView)
-        codexUpdatedItem = NSMenuItem(title: "Refreshing…", action: #selector(refreshClicked), keyEquivalent: "")
+        codexUpdatedItem = NSMenuItem(title: "Refreshing…", action: #selector(codexStatusClicked), keyEquivalent: "")
         codexUpdatedItem.target = self
         menu.addItem(codexUpdatedItem)
-        menu.addItem(.separator())
+        codexItems = Array(menu.items.dropFirst(codexStart))
+        emptyItem = NSMenuItem(title: "Choose a provider to get started", action: #selector(showProviderWelcome), keyEquivalent: "")
+        emptyItem.target = self
+        menu.addItem(emptyItem)
+        usageSeparator = .separator()
+        menu.addItem(usageSeparator)
+
+        let providers = NSMenu()
+        providers.autoenablesItems = false
+        claudeToggle = NSMenuItem(title: "Claude", action: #selector(toggleClaude), keyEquivalent: "")
+        codexToggle = NSMenuItem(title: "Codex", action: #selector(toggleCodex), keyEquivalent: "")
+        for item in [claudeToggle!, codexToggle!] { item.target = self; providers.addItem(item) }
+        let providerItem = NSMenuItem(title: "Providers", action: nil, keyEquivalent: "")
+        providerItem.submenu = providers
+        menu.addItem(providerItem)
 
         loginItem = NSMenuItem(title: "Log in to Claude\u{2026}", action: #selector(loginClicked), keyEquivalent: "")
         loginItem.target = self
         menu.addItem(loginItem)
 
-        logoutItem = NSMenuItem(title: "Log out", action: #selector(logoutClicked), keyEquivalent: "")
+        logoutItem = NSMenuItem(title: "Log out of Claude", action: #selector(logoutClicked), keyEquivalent: "")
         logoutItem.target = self
         menu.addItem(logoutItem)
 
@@ -193,22 +215,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Keep Codex visible even when Claude is disconnected.
         statusItem.button?.image = makeIcon(
             sUsage: lastSU, sTime: lastST, wUsage: lastWU, wTime: lastWT,
-            fUsage: lastFU, fTime: lastFT, showFable: lastShowFable,
+            fUsage: lastFU, fTime: lastFT, showFable: lastShowFable, showClaude: claudeEnabled, showCodex: codexEnabled,
             isDark: isDarkMenuBar, cUsage: codexUsage?.usedPercent ?? 0,
             cTime: codexUsage.map { elapsedPct(resetTs: $0.resetsAt, windowSecs: $0.windowDurationMins * 60) } ?? 0)
-        statusItem.button?.toolTip = "Claude: session, weekly, Fable (blue) · Codex: weekly (purple)"
+        let providers = [claudeEnabled ? "Claude: session, weekly" : nil, codexEnabled ? "Codex: weekly (purple)" : nil].compactMap { $0 }
+        statusItem.button?.toolTip = providers.isEmpty ? "Tokenio — choose a provider" : providers.joined(separator: " · ")
         statusItem.button?.imageScaling = .scaleProportionallyDown
     }
 
     // MARK: - Fetch
 
     private func triggerFetch(isBackground: Bool = false) {
-        guard !loading, !authFailed else { return }
+        guard claudeEnabled, !loading, !authFailed, let session = loadSession() else { return }
         loading = true
         if !isBackground { updatedItem?.title = "Refreshing\u{2026}  \u{21bb}" }
+        let generation = claudeGeneration
         DispatchQueue.global().async { [weak self] in
-            let result = fetchUsage()
-            DispatchQueue.main.async { self?.handleResult(result, isBackground: isBackground) }
+            let result = fetchUsage(session: session)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.loading = false
+                guard generation == self.claudeGeneration else {
+                    self.triggerFetch(isBackground: false)
+                    return
+                }
+                guard self.claudeEnabled else { return }
+                self.handleResult(result, isBackground: isBackground)
+            }
         }
     }
 
@@ -217,7 +250,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         switch result {
         case .success(let d):
+            saveSnapshot(d)
             claudeError = nil
+            updatedItem.toolTip = nil
             applySnapshot(d)
             lastFetched = Date().timeIntervalSince1970
             authFailed = false
@@ -225,19 +260,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             updateAuthVisibility()
 
         case .needsLogin:
+            clearSession()
+            claudeError = nil
             authFailed = true
             updateIcon()
-            if lastFetched > 0 {
-                updatedItem.title = "Session expired (\(fmtAgo(lastFetched)))  \u{26a0}"
-            } else {
-                updatedItem.title = "Not logged in  \u{26a0}"
-            }
+            updatedItem.title = "Sign in to Claude…"
             updateAuthVisibility()
 
         case .error(let msg):
             claudeError = msg
-            let short = msg.count > 40 ? String(msg.prefix(40)) + "\u{2026}" : msg
-            updatedItem.title = "\(short)  \u{26a0}"
+            updatedItem.title = lastFetched > 0 ? "Saved usage — details…" : "Refresh failed — details…"
+            updatedItem.toolTip = msg
         }
     }
 
@@ -290,39 +323,55 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func updateAuthVisibility() {
         let loggedIn = loadSession() != nil
-        loginItem.isHidden = loggedIn
-        logoutItem.isHidden = !loggedIn
+        loginItem.isHidden = !claudeEnabled || (loggedIn && !authFailed)
+        logoutItem.isHidden = !claudeEnabled || !loggedIn
+        for item in claudeItems { item.isHidden = !claudeEnabled }
+        fableItem.isHidden = !claudeEnabled || !(claudeSnapshot?.fableEnabled ?? false)
+        extraItem.isHidden = !claudeEnabled || !(claudeSnapshot?.extraEnabled ?? false)
+        for item in codexItems { item.isHidden = !codexEnabled }
+        providerSeparator.isHidden = !claudeEnabled || !codexEnabled
+        emptyItem.isHidden = claudeEnabled || codexEnabled
+        claudeToggle.state = claudeEnabled ? .on : .off
+        codexToggle.state = codexEnabled ? .on : .off
     }
 
     // MARK: - Relative time
 
     private func updateRelativeTime() {
-        if let snapshot = claudeSnapshot { applySnapshot(snapshot) }
-        if lastFetched > 0, !authFailed, claudeError == nil {
+        if claudeEnabled, let snapshot = claudeSnapshot { applySnapshot(snapshot) }
+        if lastFetched > 0, !loading, !authFailed, claudeError == nil {
             updatedItem.title = "Updated \(fmtAgo(lastFetched))  ↻"
         }
         if let usage = codexUsage {
             codexView.setData(value: "\(Int(usage.usedPercent))%", usageFrac: usage.usedPercent / 100,
                               timeFrac: elapsedPct(resetTs: usage.resetsAt, windowSecs: usage.windowDurationMins * 60) / 100,
                               resetStr: "Resets in \(fmtReset(usage.resetsAt))")
-            codexUpdatedItem.title = codexError ?? "Updated \(fmtAgo(usage.fetchedAt))  ↻"
+            codexUpdatedItem.title = codexError == nil ? "Updated \(fmtAgo(usage.fetchedAt))  ↻" : "Saved usage — details…"
+            codexUpdatedItem.toolTip = codexError.map { "\($0)\n\nShowing saved usage from \(fmtAgo(usage.fetchedAt))." }
         } else {
-            codexUpdatedItem.title = codexError ?? "Refreshing…"
+            codexView.setData(value: "—", usageFrac: 0, timeFrac: 0, resetStr: "Waiting for usage")
+            codexUpdatedItem.title = codexError == nil ? "Refreshing…" : "Connect Codex — details…"
+            codexUpdatedItem.toolTip = codexError
         }
+        if codexLoading { codexUpdatedItem.title = "Refreshing…" }
+        updateAuthVisibility()
         updateIcon()
     }
 
     private func triggerCodexFetch() {
-        guard !codexLoading else { return }
+        guard codexEnabled, !codexLoading else { return }
         codexLoading = true
+        codexUpdatedItem.title = "Refreshing…"
         DispatchQueue.global().async { [weak self] in
             let result = Result { try CodexUsage.fetch() }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.codexLoading = false
+                guard self.codexEnabled else { return }
                 switch result {
                 case .success(let usage):
                     self.codexUsage = usage
+                    if let data = try? JSONEncoder().encode(usage) { UserDefaults.standard.set(data, forKey: "codexUsage") }
                     self.codexError = nil
                 case .failure(let error):
                     self.codexError = error.localizedDescription
@@ -334,22 +383,87 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Actions
 
+    func menuWillOpen(_ menu: NSMenu) {
+        updateRelativeTime()
+    }
+
+    private func setClaudeEnabled(_ enabled: Bool) {
+        claudeEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "claudeEnabled")
+        UserDefaults.standard.set(true, forKey: "providerWelcomeShown")
+        updateAuthVisibility()
+        updateIcon()
+    }
+
+    private func setCodexEnabled(_ enabled: Bool) {
+        codexEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "codexEnabled")
+        UserDefaults.standard.set(true, forKey: "providerWelcomeShown")
+        updateAuthVisibility()
+        updateIcon()
+    }
+
+    @objc private func toggleClaude() {
+        setClaudeEnabled(!claudeEnabled)
+        if claudeEnabled {
+            if loadSession() == nil || authFailed { loginClicked() }
+            else { triggerFetch(isBackground: false) }
+        }
+    }
+
+    @objc private func toggleCodex() {
+        setCodexEnabled(!codexEnabled)
+        if codexEnabled { triggerCodexFetch() }
+    }
+
+    @objc private func showProviderWelcome() { showWelcome() }
+
+    private func showError(provider: String, message: String, fetchedAt: TimeInterval, retry: () -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "\(provider) couldn’t refresh"
+        alert.informativeText = message + (fetchedAt > 0 ? "\n\nShowing saved usage from \(fmtAgo(fetchedAt))." : "")
+        alert.addButton(withTitle: "Retry")
+        alert.addButton(withTitle: "Close")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn { retry() }
+    }
+
+    @objc private func claudeStatusClicked() {
+        if authFailed { loginClicked() }
+        else if let error = claudeError {
+            showError(provider: "Claude", message: error, fetchedAt: lastFetched) { triggerFetch(isBackground: false) }
+        } else { triggerFetch(isBackground: false) }
+    }
+
+    @objc private func codexStatusClicked() {
+        if let error = codexError {
+            showError(provider: "Codex", message: error, fetchedAt: codexUsage?.fetchedAt ?? 0) { triggerCodexFetch() }
+        } else { triggerCodexFetch() }
+    }
+
     @objc private func refreshClicked() { triggerFetch(isBackground: false); triggerCodexFetch() }
 
     @objc private func wakeRefresh() { triggerFetch(isBackground: true); triggerCodexFetch() }
 
     private func showWelcome() {
+        welcomeWindow?.close()
         welcomeWindow = WelcomeWindow(onLogin: { [weak self] in
-            self?.welcomeWindow = nil
+            self?.setClaudeEnabled(true)
             self?.loginClicked()
+        }, onCodex: { [weak self] in
+            self?.setCodexEnabled(true)
+            self?.triggerCodexFetch()
         })
         welcomeWindow?.show()
     }
 
     @objc private func loginClicked() {
+        guard loginWindow == nil else { loginWindow?.show(); return }
         loginWindow = LoginWindow(
             onSuccess: { [weak self] sessionKey, orgId in
+                self?.claudeGeneration += 1
                 saveSession(Session(sessionKey: sessionKey, orgId: orgId))
+                self?.setClaudeEnabled(true)
                 self?.authFailed = false
                 self?.loginWindow = nil
                 self?.updateAuthVisibility()
@@ -363,6 +477,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func logoutClicked() {
+        claudeGeneration += 1
         clearSession()
         clearSnapshot()
         claudeSnapshot = nil
@@ -375,6 +490,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         weeklyView.setData(value: "\u{2014}", usageFrac: 0, timeFrac: 0, resetStr: "\u{2014}")
         fableItem.isHidden = true
         extraItem.isHidden = true
+        setClaudeEnabled(false)
         updateAuthVisibility()
     }
 
