@@ -359,7 +359,8 @@ func fmtAgo(_ ts: TimeInterval) -> String {
     let mins = secs / 60
     if mins < 60 { return mins == 1 ? "1 min ago" : "\(mins) mins ago" }
     let hrs = mins / 60
-    return hrs == 1 ? "1h ago" : "\(hrs)h ago"
+    if hrs < 48 { return hrs == 1 ? "1h ago" : "\(hrs)h ago" }
+    return "\(hrs / 24) days ago"
 }
 
 func fmtReset(_ ts: TimeInterval) -> String {

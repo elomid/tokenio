@@ -11,7 +11,7 @@
         A10011 = {isa = PBXBuildFile; fileRef = A20011; };
 		A10001 /* TokenioApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001; };
 		A10002 /* BarRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20002; };
-		A10003 /* MetricMenuView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20003; };
+		A10003 /* UsagePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20003; };
 		A10004 /* UsageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20004; };
 		A10005 /* LoginWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20005; };
 		A10007 /* WelcomeWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20009; };
@@ -23,7 +23,7 @@
         A20011 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityUsage.swift; sourceTree = "<group>"; };
 		A20001 /* TokenioApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenioApp.swift; sourceTree = "<group>"; };
 		A20002 /* BarRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarRenderer.swift; sourceTree = "<group>"; };
-		A20003 /* MetricMenuView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricMenuView.swift; sourceTree = "<group>"; };
+		A20003 /* UsagePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsagePanel.swift; sourceTree = "<group>"; };
 		A20004 /* UsageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageService.swift; sourceTree = "<group>"; };
 		A20005 /* LoginWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginWindow.swift; sourceTree = "<group>"; };
 		A20009 /* WelcomeWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeWindow.swift; sourceTree = "<group>"; };
@@ -65,7 +65,7 @@
 			children = (
 				A20001 /* TokenioApp.swift */,
 				A20002 /* BarRenderer.swift */,
-				A20003 /* MetricMenuView.swift */,
+				A20003 /* UsagePanel.swift */,
 				A20004 /* UsageService.swift */,
                 A20010 /* CodexUsage.swift */,
                 A20011 /* AntigravityUsage.swift */,
@@ -141,7 +141,7 @@
 			files = (
 				A10001 /* TokenioApp.swift in Sources */,
 				A10002 /* BarRenderer.swift in Sources */,
-				A10003 /* MetricMenuView.swift in Sources */,
+				A10003 /* UsagePanel.swift in Sources */,
 				A10004 /* UsageService.swift in Sources */,
                 A10010 /* CodexUsage.swift in Sources */,
                 A10011 /* AntigravityUsage.swift in Sources */,

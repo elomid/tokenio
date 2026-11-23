@@ -2,7 +2,7 @@ import AppKit
 import ServiceManagement
 
 @main
-class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate {
 
     static func main() {
         let app = NSApplication.shared
@@ -18,57 +18,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var iconShowsClaude = UserDefaults.standard.object(forKey: "iconShowsClaude") as? Bool ?? true
     private var iconShowsCodex = UserDefaults.standard.object(forKey: "iconShowsCodex") as? Bool ?? true
     private var iconShowsAntigravity = UserDefaults.standard.object(forKey: "iconShowsAntigravity") as? Bool ?? true
-    private var claudeItems: [NSMenuItem] = []
-    private var codexItems: [NSMenuItem] = []
-    private var providerSeparator: NSMenuItem!
-    private var antigravitySeparator: NSMenuItem!
-    private var antigravityHeader: NSMenuItem!
-    private var antigravityMetricItems: [NSMenuItem] = []
-    private var antigravityUpdatedItem: NSMenuItem!
-    private var antigravityUsage = AntigravityUsage.cached
-    private var antigravityLoading = false
-    private var antigravityError: String?
-    private var usageSeparator: NSMenuItem!
-    private var emptyItem: NSMenuItem!
-    private var claudeToggle: NSMenuItem!
-    private var codexToggle: NSMenuItem!
-    private var antigravityToggle: NSMenuItem!
-    private var iconClaudeToggle: NSMenuItem!
-    private var iconCodexToggle: NSMenuItem!
-    private var iconAntigravityToggle: NSMenuItem!
-    private var claudeGeneration = 0
-    private var codexView: MetricMenuView!
-    private var codexUpdatedItem: NSMenuItem!
-    private var codexUsage = CodexUsage.cached
-    private var codexLoading = false
-    private var codexError: String?
+    private var mode = DisplayMode.current
+
+    private var statusItem: NSStatusItem!
+    private var panel: UsagePanelController!
+
     private var claudeSnapshot: UsageData?
     private var claudeError: String?
-    private var statusItem: NSStatusItem!
-    private var sessionView: MetricMenuView!
-    private var weeklyView: MetricMenuView!
-    private var fableView: MetricMenuView!
-    private var fableItem: NSMenuItem!
-    private var extraView: MetricMenuView!
-    private var extraItem: NSMenuItem!
-    private var updatedItem: NSMenuItem!
-    private var loginItem: NSMenuItem!
-    private var logoutItem: NSMenuItem!
-    private var launchAtLoginItem: NSMenuItem!
-
-    private var fetchTimer: Timer?
-    private var uiTimer: Timer?
+    private var claudeGeneration = 0
     private var lastFetched: TimeInterval = 0
     private var loading = false
     private var authFailed = false
+
+    private var codexUsage = CodexUsage.cached
+    private var codexLoading = false
+    private var codexError: String?
+
+    private var antigravityUsage = AntigravityUsage.cached
+    private var antigravityLoading = false
+    private var antigravityError: String?
+
+    private var fetchTimer: Timer?
+    private var uiTimer: Timer?
+    private var appearanceObservation: NSKeyValueObservation?
     private var loginWindow: LoginWindow?
     private var welcomeWindow: WelcomeWindow?
-
-    // Last known icon values for redraw on appearance change
-    private var lastSU: Double = 0, lastST: Double = 0
-    private var lastWU: Double = 0, lastWT: Double = 0
-    private var lastFU: Double = 0, lastFT: Double = 0
-    private var lastShowFable = false
 
     private let refreshInterval: TimeInterval = 300 // 5 min
 
@@ -83,40 +57,33 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        buildMenu()
+        buildPanel()
         triggerCodexFetch()
         triggerAntigravityFetch()
 
         if claudeEnabled, loadSession() != nil {
-            // Logged in — show snapshot immediately if available, then refresh
+            // Logged in: show the saved snapshot immediately, then refresh.
             if let (snapshot, ts) = loadSnapshot() {
-                applySnapshot(snapshot)
+                claudeSnapshot = snapshot
                 lastFetched = ts
-                updatedItem.title = "Updated \(fmtAgo(ts))  \u{21bb}"
-            } else {
-                updateIcon()
             }
-            triggerFetch(isBackground: true)
+            triggerFetch()
         } else {
             authFailed = loadSession() == nil
-            updatedItem.title = "Sign in to Claude…"
         }
-        updateAuthVisibility()
-        updateRelativeTime()
+        refreshUI()
         if !claudeEnabled && !codexEnabled && !antigravityEnabled && !UserDefaults.standard.bool(forKey: "providerWelcomeShown") {
             UserDefaults.standard.set(true, forKey: "providerWelcomeShown")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.showWelcome() }
         }
 
         fetchTimer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
-            self?.triggerFetch(isBackground: true)
-            self?.triggerCodexFetch()
-            self?.triggerAntigravityFetch()
+            self?.refreshAll()
         }
         RunLoop.main.add(fetchTimer!, forMode: .common)
 
         uiTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
-            self?.updateRelativeTime()
+            self?.refreshUI()
         }
         RunLoop.main.add(uiTimer!, forMode: .common)
 
@@ -126,158 +93,297 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         )
     }
 
-    // MARK: - Menu
+    // MARK: - Panel
 
-    private func buildMenu() {
+    private func buildPanel() {
+        if let button = statusItem.button {
+            button.target = self
+            button.action = #selector(statusItemClicked)
+            button.sendAction(on: [.leftMouseDown, .rightMouseDown])
+            button.imageScaling = .scaleNone
+            button.setAccessibilityTitle("Tokenio")
+            appearanceObservation = button.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+                DispatchQueue.main.async { self?.updateIcon() }
+            }
+        }
+        panel = UsagePanelController(statusItem: statusItem)
+        panel.view.refreshButton.target = self
+        panel.view.refreshButton.action = #selector(refreshClicked)
+        panel.view.moreButton.target = self
+        panel.view.moreButton.action = #selector(moreClicked(_:))
+        panel.view.columns.onGroupClick = { [weak self] id in self?.groupClicked(id) }
+    }
+
+    @objc private func statusItemClicked() {
+        refreshUI()
+        panel.toggle()
+    }
+
+    /// Redraws the icon and, when the panel is open, its contents.
+    private func refreshUI() {
+        updateIcon()
+        guard let panel else { return }
+        panel.view.columns.mode = mode
+        panel.view.columns.groups = panelGroups()
+        panel.view.refreshButton.title = footerText()
+        if panel.isVisible { panel.resize() }
+    }
+
+    private func claudeColumns(_ d: UsageData) -> [PanelColumn] {
+        func column(_ label: String, _ pct: Double, _ reset: TimeInterval, _ window: TimeInterval, tint: BarTint = .neutral) -> PanelColumn {
+            PanelColumn(label: label, value: .make(usedPercent: pct, resetsAt: reset, windowSecs: window, tint: tint), resetsAt: reset)
+        }
+        var columns = [column("5h", d.sessionPct, d.sessionReset, 5 * 3600),
+                       column("Week", d.weeklyPct, d.weeklyReset, 7 * 86400)]
+        if d.fableEnabled { columns.append(column("Fable", d.fablePct, d.fableReset, 7 * 86400, tint: .fable)) }
+        if d.extraEnabled {
+            let days = Double(Calendar.current.range(of: .day, in: .month, for: Date())?.count ?? 30)
+            var extra = column("Extra", d.overagePct, d.overageReset, days * 86400)
+            extra.toolTip = "Extra usage: $\(String(format: "%.2f", d.extraDollars)) spent"
+            columns.append(extra)
+        }
+        return columns
+    }
+
+    private func codexColumns(_ u: CodexUsage) -> [PanelColumn] {
+        [PanelColumn(label: Self.windowLabel(minutes: u.windowDurationMins),
+                     value: .make(usedPercent: u.usedPercent, resetsAt: u.resetsAt, windowSecs: u.windowDurationMins * 60),
+                     resetsAt: u.resetsAt)]
+    }
+
+    static func windowLabel(minutes: Double) -> String {
+        switch minutes {
+        case 10080: return "Week"
+        case 1440: return "Day"
+        case 40320...44640: return "Month"
+        case ..<1440: return "\(Int((minutes / 60).rounded()))h"
+        default: return "\(Int((minutes / 1440).rounded()))d"
+        }
+    }
+
+    /// Antigravity titles read "<window> - <group>". The first group's columns are
+    /// named by window ("5h", "Week"); other groups by model ("Flash").
+    static func antigravityLabels(_ titles: [String]) -> [String] {
+        let parts = titles.map { title -> (window: String, group: String) in
+            let pieces = title.components(separatedBy: " - ")
+            return pieces.count > 1 ? (pieces[0], pieces.dropFirst().joined(separator: " - ")) : (title, "")
+        }
+        func short(_ window: String) -> String {
+            if window.hasSuffix("-hour"), let n = Int(window.dropLast(5)) { return "\(n)h" }
+            switch window {
+            case "Weekly": return "Week"
+            case "Daily": return "Day"
+            case "Monthly": return "Month"
+            default: return window.components(separatedBy: " ").first ?? window
+            }
+        }
+        let primary = parts.first?.group ?? ""
+        return parts.map { p in
+            if p.group == primary || p.group.isEmpty { return short(p.window) }
+            // "Gemini 3 Flash" reads as "Flash"; a trailing version number keeps the whole name.
+            let last = p.group.components(separatedBy: " ").last ?? p.group
+            let model = last.allSatisfy(\.isNumber) ? p.group : last
+            let siblings = parts.filter { $0.group == p.group }.count
+            return siblings > 1 ? "\(model) \(short(p.window))" : model
+        }
+    }
+
+    private func antigravityColumns(_ u: AntigravityUsage) -> [PanelColumn] {
+        let labels = Self.antigravityLabels(u.limits.map(\.title))
+        return zip(u.limits, labels).map { limit, label in
+            PanelColumn(label: label, value: .make(usedPercent: limit.usedPercent, resetsAt: limit.resetsAt, windowSecs: limit.windowSecs, tint: .antigravity),
+                        resetsAt: limit.resetsAt, toolTip: limit.title)
+        }
+    }
+
+    /// Limits belonging to Antigravity's primary model group (e.g. 5h and Week), shown in the menu bar icon.
+    private func antigravityIconBars(_ u: AntigravityUsage) -> [BarValue] {
+        func groupName(_ title: String) -> String {
+            let pieces = title.components(separatedBy: " - ")
+            return pieces.count > 1 ? pieces.dropFirst().joined(separator: " - ") : ""
+        }
+        guard let first = u.limits.first else { return [] }
+        let primary = groupName(first.title)
+        let primaryLimits = u.limits.filter { groupName($0.title) == primary }
+        return primaryLimits.prefix(2).map {
+            .make(usedPercent: $0.usedPercent, resetsAt: $0.resetsAt, windowSecs: $0.windowSecs, tint: .antigravity)
+        }
+    }
+
+    private func panelGroups() -> [PanelGroup] {
+        var groups: [PanelGroup] = []
+        if claudeEnabled {
+            if loadSession() == nil || authFailed {
+                groups.append(PanelGroup(id: "claude", name: "Claude", columns: [], status: .action("Sign in…")))
+            } else if let snapshot = claudeSnapshot {
+                groups.append(PanelGroup(id: "claude", name: "Claude", columns: claudeColumns(snapshot),
+                                         status: claudeError.map { .warning($0) } ?? .ok))
+            } else {
+                groups.append(PanelGroup(id: "claude", name: "Claude", columns: [],
+                                         status: claudeError == nil || loading ? .loading : .action("Couldn’t load…")))
+            }
+        }
+        if codexEnabled {
+            if let usage = codexUsage {
+                groups.append(PanelGroup(id: "codex", name: "Codex", columns: codexColumns(usage), status: codexError.map { .warning($0) } ?? .ok))
+            } else {
+                groups.append(PanelGroup(id: "codex", name: "Codex", columns: [], status: codexError == nil || codexLoading ? .loading : .action("Connect Codex…")))
+            }
+        }
+        if antigravityEnabled {
+            if let usage = antigravityUsage {
+                groups.append(PanelGroup(id: "antigravity", name: "Antigravity", columns: antigravityColumns(usage),
+                                         status: antigravityError.map { .warning($0) } ?? .ok))
+            } else {
+                groups.append(PanelGroup(id: "antigravity", name: "Antigravity", columns: [],
+                                         status: antigravityError == nil || antigravityLoading ? .loading : .action("Connect Antigravity…")))
+            }
+        }
+        return groups
+    }
+
+    /// One line for every provider: the oldest successful refresh among those showing numbers.
+    private func footerText() -> String {
+        if (claudeEnabled && loading) || (codexEnabled && codexLoading) || (antigravityEnabled && antigravityLoading) {
+            return "Refreshing…"
+        }
+        var times: [TimeInterval] = []
+        if claudeEnabled, claudeSnapshot != nil, lastFetched > 0, !authFailed { times.append(lastFetched) }
+        if codexEnabled, let usage = codexUsage { times.append(usage.fetchedAt) }
+        if antigravityEnabled, let usage = antigravityUsage { times.append(usage.fetchedAt) }
+        guard let oldest = times.min() else { return "Refresh" }
+        return "Updated \(fmtAgo(oldest))"
+    }
+
+    private func groupClicked(_ id: String?) {
+        panel.close()
+        switch id {
+        case nil:
+            showWelcome()
+        case "claude":
+            if loadSession() == nil || authFailed { loginClicked() }
+            else if let error = claudeError {
+                showError(provider: "Claude", message: error, fetchedAt: claudeSnapshot == nil ? 0 : lastFetched) { triggerFetch() }
+            }
+        case "codex":
+            showError(provider: "Codex", message: codexError ?? "Couldn’t read Codex usage.", fetchedAt: codexUsage?.fetchedAt ?? 0) { triggerCodexFetch() }
+        case "antigravity":
+            showError(provider: "Antigravity", message: antigravityError ?? "Couldn’t read Antigravity usage.",
+                      fetchedAt: antigravityUsage?.fetchedAt ?? 0) { triggerAntigravityFetch() }
+        default:
+            break
+        }
+    }
+
+    // MARK: - More menu
+
+    @objc private func moreClicked(_ sender: NSButton) {
+        let menu = buildMoreMenu()
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: sender.bounds.maxY + 4), in: sender)
+        panel.view.resetHover()
+    }
+
+    private func buildMoreMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        menu.delegate = self
-        menu.minimumWidth = 250
-
-        func addMetric(_ view: MetricMenuView) {
-            let item = NSMenuItem()
-            item.view = view
-            menu.addItem(item)
+        func item(_ title: String, _ action: Selector?, key: String = "", state: Bool? = nil, enabled: Bool = true) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            item.target = self
+            if let state { item.state = state ? .on : .off }
+            item.isEnabled = enabled
+            return item
         }
-
-        func addSection(_ title: String) {
-            let item = NSMenuItem()
-            item.view = SectionHeaderView(title: title)
-            menu.addItem(item)
+        func submenu(_ title: String, _ items: [NSMenuItem]) -> NSMenuItem {
+            let parent = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            let sub = NSMenu()
+            sub.autoenablesItems = false
+            items.forEach(sub.addItem)
+            parent.submenu = sub
+            return parent
         }
-
-        addSection("Claude")
-        sessionView = MetricMenuView(title: "Current session")
-        weeklyView = MetricMenuView(title: "Weekly - All models")
-        fableView = MetricMenuView(title: "Weekly - Fable", fill: fableBlue)
-        extraView = MetricMenuView(title: "Extra usage")
-
-        addMetric(sessionView)
-        addMetric(weeklyView)
-
-        fableItem = NSMenuItem()
-        fableItem.view = fableView
-        fableItem.isHidden = true
-        menu.addItem(fableItem)
-
-        extraItem = NSMenuItem()
-        extraItem.view = extraView
-        extraItem.isHidden = true
-        menu.addItem(extraItem)
-
-        updatedItem = NSMenuItem(title: "Refreshing\u{2026}  \u{21bb}", action: #selector(claudeStatusClicked), keyEquivalent: "")
-        updatedItem.target = self
-        menu.addItem(updatedItem)
-
-        claudeItems = menu.items
-        providerSeparator = .separator()
-        menu.addItem(providerSeparator)
-        let codexStart = menu.items.count
-        addSection("Codex")
-        codexView = MetricMenuView(title: "Weekly", fill: codexPurple)
-        addMetric(codexView)
-        codexUpdatedItem = NSMenuItem(title: "Refreshing…", action: #selector(codexStatusClicked), keyEquivalent: "")
-        codexUpdatedItem.target = self
-        menu.addItem(codexUpdatedItem)
-        codexItems = Array(menu.items.dropFirst(codexStart))
-        antigravitySeparator = .separator()
-        menu.addItem(antigravitySeparator)
-        antigravityHeader = NSMenuItem()
-        antigravityHeader.view = SectionHeaderView(title: "Antigravity")
-        menu.addItem(antigravityHeader)
-        antigravityUpdatedItem = NSMenuItem(title: "Refreshing…", action: #selector(antigravityStatusClicked), keyEquivalent: "")
-        antigravityUpdatedItem.target = self
-        menu.addItem(antigravityUpdatedItem)
-        syncAntigravityMetrics()
-        emptyItem = NSMenuItem(title: "Choose a provider to get started", action: #selector(showProviderWelcome), keyEquivalent: "")
-        emptyItem.target = self
-        menu.addItem(emptyItem)
-        usageSeparator = .separator()
-        menu.addItem(usageSeparator)
-
-        let providers = NSMenu()
-        providers.autoenablesItems = false
-        claudeToggle = NSMenuItem(title: "Claude", action: #selector(toggleClaude), keyEquivalent: "")
-        codexToggle = NSMenuItem(title: "Codex", action: #selector(toggleCodex), keyEquivalent: "")
-        antigravityToggle = NSMenuItem(title: "Antigravity", action: #selector(toggleAntigravity), keyEquivalent: "")
-        for item in [claudeToggle!, codexToggle!, antigravityToggle!] { item.target = self; providers.addItem(item) }
-        let providerItem = NSMenuItem(title: "Providers", action: nil, keyEquivalent: "")
-        providerItem.submenu = providers
-        menu.addItem(providerItem)
-
-        let iconProviders = NSMenu()
-        iconProviders.autoenablesItems = false
-        iconClaudeToggle = NSMenuItem(title: "Claude", action: #selector(toggleIconClaude), keyEquivalent: "")
-        iconCodexToggle = NSMenuItem(title: "Codex", action: #selector(toggleIconCodex), keyEquivalent: "")
-        iconAntigravityToggle = NSMenuItem(title: "Antigravity", action: #selector(toggleIconAntigravity), keyEquivalent: "")
-        for item in [iconClaudeToggle!, iconCodexToggle!, iconAntigravityToggle!] { item.target = self; iconProviders.addItem(item) }
-        let iconItem = NSMenuItem(title: "Menu Bar Icon", action: nil, keyEquivalent: "")
-        iconItem.submenu = iconProviders
-        menu.addItem(iconItem)
-
-        loginItem = NSMenuItem(title: "Log in to Claude\u{2026}", action: #selector(loginClicked), keyEquivalent: "")
-        loginItem.target = self
-        menu.addItem(loginItem)
-
-        logoutItem = NSMenuItem(title: "Log out of Claude", action: #selector(logoutClicked), keyEquivalent: "")
-        logoutItem.target = self
-        menu.addItem(logoutItem)
-
-        updateAuthVisibility()
-
-        launchAtLoginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
-        launchAtLoginItem.target = self
-        launchAtLoginItem.state = LaunchAtLogin.isEnabled ? .on : .off
-        menu.addItem(launchAtLoginItem)
-
-        let aboutItem = NSMenuItem(title: "About Tokenio", action: #selector(aboutClicked), keyEquivalent: "")
-        aboutItem.target = self
-        menu.addItem(aboutItem)
-
+        menu.addItem(submenu("Providers", [
+            item("Claude", #selector(toggleClaude), state: claudeEnabled),
+            item("Codex", #selector(toggleCodex), state: codexEnabled),
+            item("Antigravity", #selector(toggleAntigravity), state: antigravityEnabled),
+        ]))
+        let iconItems = [
+            item("Claude", #selector(toggleIconClaude), state: iconShowsClaude, enabled: claudeEnabled),
+            item("Codex", #selector(toggleIconCodex), state: iconShowsCodex, enabled: codexEnabled),
+            item("Antigravity", #selector(toggleIconAntigravity), state: iconShowsAntigravity, enabled: antigravityEnabled),
+        ]
+        for i in iconItems where !i.isEnabled { i.toolTip = "Turn this provider on in Providers first." }
+        menu.addItem(submenu("Menu Bar Icon", iconItems))
+        menu.addItem(submenu("Show", [
+            item("Used", #selector(showUsed), state: mode == .used),
+            item("Left", #selector(showLeft), state: mode == .left),
+        ]))
         menu.addItem(.separator())
+        if claudeEnabled {
+            if loadSession() != nil, !authFailed { menu.addItem(item("Log out of Claude", #selector(logoutClicked))) }
+            else { menu.addItem(item("Log in to Claude…", #selector(loginClicked))) }
+        }
+        menu.addItem(item("Launch at Login", #selector(toggleLaunchAtLogin), state: LaunchAtLogin.isEnabled))
+        menu.addItem(item("About Tokenio", #selector(aboutClicked)))
+        menu.addItem(.separator())
+        menu.addItem(item("Quit Tokenio", #selector(quitClicked), key: "q"))
+        return menu
+    }
 
-        let quitItem = NSMenuItem(title: "Quit Tokenio", action: #selector(quitClicked), keyEquivalent: "q")
-        quitItem.target = self
-        menu.addItem(quitItem)
+    @objc private func showUsed() { setMode(.used) }
+    @objc private func showLeft() { setMode(.left) }
 
-        statusItem.menu = menu
+    private func setMode(_ newMode: DisplayMode) {
+        mode = newMode
+        UserDefaults.standard.set(newMode.rawValue, forKey: "displayMode")
+        refreshUI()
     }
 
     // MARK: - Icon
-
-    private var isDarkMenuBar: Bool {
-        statusItem.button?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-    }
 
     private var iconClaude: Bool { claudeEnabled && iconShowsClaude }
     private var iconCodex: Bool { codexEnabled && iconShowsCodex }
     private var iconAntigravity: Bool { antigravityEnabled && iconShowsAntigravity }
 
+    /// Claude's session and weekly (and Fable), Codex's limit, and Antigravity's
+    /// primary 5h and weekly limits, for the providers chosen in Menu Bar Icon.
+    private func iconGroups() -> [[BarValue]] {
+        let empty = BarValue(used: 0, elapsed: 0, stale: true)
+        var groups: [[BarValue]] = []
+        if iconClaude {
+            if let d = claudeSnapshot, !authFailed {
+                groups.append(claudeColumns(d).filter { $0.label != "Extra" }.map(\.value))
+            } else {
+                groups.append([empty, empty])
+            }
+        }
+        if iconCodex { groups.append(codexUsage.map { codexColumns($0).map(\.value) } ?? [empty]) }
+        if iconAntigravity {
+            let bars = antigravityUsage.map(antigravityIconBars) ?? []
+            groups.append(bars.isEmpty ? [BarValue(used: 0, elapsed: 0, stale: true, tint: .antigravity)] : bars)
+        }
+        return groups
+    }
+
+    private var isDarkMenuBar: Bool {
+        statusItem.button?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    }
+
     private func updateIcon() {
-        // Keep Codex and Antigravity visible even when Claude is disconnected.
-        let tightest = antigravityUsage?.tightest
-        statusItem.button?.image = makeIcon(
-            sUsage: lastSU, sTime: lastST, wUsage: lastWU, wTime: lastWT,
-            fUsage: lastFU, fTime: lastFT, showFable: lastShowFable, showClaude: iconClaude, showCodex: iconCodex,
-            isDark: isDarkMenuBar, cUsage: codexUsage?.usedPercent ?? 0,
-            cTime: codexUsage.map { elapsedPct(resetTs: $0.resetsAt, windowSecs: $0.windowDurationMins * 60) } ?? 0,
-            showAntigravity: iconAntigravity, aUsage: tightest.map(antigravityUsed) ?? 0,
-            aTime: tightest.map(antigravityElapsed) ?? 0)
-        let providers = [iconClaude ? "Claude: session, weekly" : nil, iconCodex ? "Codex: weekly (purple)" : nil,
-                         iconAntigravity ? "Antigravity: tightest limit (teal)" : nil].compactMap { $0 }
-        let anyEnabled = claudeEnabled || codexEnabled || antigravityEnabled
-        statusItem.button?.toolTip = providers.isEmpty
-            ? (anyEnabled ? "Tokenio — choose providers in Menu Bar Icon" : "Tokenio — choose a provider")
-            : providers.joined(separator: " · ")
-        statusItem.button?.imageScaling = .scaleProportionallyDown
+        statusItem.button?.image = makeStatusIcon(groups: iconGroups(), mode: mode, isDark: isDarkMenuBar)
     }
 
     // MARK: - Fetch
 
-    private func triggerFetch(isBackground: Bool = false) {
+    private func refreshAll(isBackground: Bool = true) {
+        triggerFetch()
+        triggerCodexFetch()
+        triggerAntigravityFetch()
+    }
+
+    private func triggerFetch() {
         guard claudeEnabled, !loading, !authFailed, let session = loadSession() else { return }
         loading = true
-        if !isBackground { updatedItem?.title = "Refreshing\u{2026}  \u{21bb}" }
+        refreshUI()
         let generation = claudeGeneration
         DispatchQueue.global().async { [weak self] in
             let result = fetchUsage(session: session)
@@ -285,270 +391,115 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 guard let self else { return }
                 self.loading = false
                 guard generation == self.claudeGeneration else {
-                    self.triggerFetch(isBackground: false)
+                    self.triggerFetch()
                     return
                 }
-                guard self.claudeEnabled else { return }
-                self.handleResult(result, isBackground: isBackground)
+                guard self.claudeEnabled else { self.refreshUI(); return }
+                self.handleResult(result)
             }
         }
     }
 
-    private func handleResult(_ result: UsageResult, isBackground: Bool) {
-        loading = false
-
+    private func handleResult(_ result: UsageResult) {
         switch result {
         case .success(let d):
             saveSnapshot(d)
+            claudeSnapshot = d
             claudeError = nil
-            updatedItem.toolTip = nil
-            applySnapshot(d)
             lastFetched = Date().timeIntervalSince1970
             authFailed = false
-            updatedItem.title = "Updated just now  \u{21bb}"
-            updateAuthVisibility()
-
         case .needsLogin:
             clearSession()
             claudeError = nil
             authFailed = true
-            updateIcon()
-            updatedItem.title = "Sign in to Claude…"
-            updateAuthVisibility()
-
         case .error(let msg):
             claudeError = msg
-            updatedItem.title = lastFetched > 0 ? "Saved usage — details…" : "Refresh failed — details…"
-            updatedItem.toolTip = msg
         }
-    }
-
-    private func applySnapshot(_ d: UsageData, iconOverride: Bool = true) {
-        claudeSnapshot = d
-        var sU = d.sessionPct
-        let sR = d.sessionReset
-        if sR > 0, sR < Date().timeIntervalSince1970 { sU = 0 }
-        let sT = elapsedPct(resetTs: sR, windowSecs: 5 * 3600)
-
-        var wU = d.weeklyPct
-        let wR = d.weeklyReset
-        if wR > 0, wR < Date().timeIntervalSince1970 { wU = 0 }
-        let wT = elapsedPct(resetTs: wR, windowSecs: 7 * 24 * 3600)
-
-        var fU = d.fablePct
-        let fR = d.fableReset
-        if fR > 0, fR < Date().timeIntervalSince1970 { fU = 0 }
-        let fT = elapsedPct(resetTs: fR, windowSecs: 7 * 24 * 3600)
-
-        lastSU = sU; lastST = sT; lastWU = wU; lastWT = wT
-        lastFU = fU; lastFT = fT; lastShowFable = d.fableEnabled
-        if iconOverride {
-            updateIcon()
-        }
-
-        sessionView.setData(value: "\(Int(sU))%", usageFrac: sU / 100, timeFrac: sT / 100, resetStr: "Resets in \(fmtReset(sR))")
-        weeklyView.setData(value: "\(Int(wU))%", usageFrac: wU / 100, timeFrac: wT / 100, resetStr: "Resets in \(fmtReset(wR))")
-        if d.fableEnabled {
-            fableView.setData(value: "\(Int(fU))%", usageFrac: fU / 100, timeFrac: fT / 100, resetStr: "Resets in \(fmtReset(fR))")
-            fableItem.isHidden = false
-        } else {
-            fableItem.isHidden = true
-        }
-
-        if d.extraEnabled {
-            let oU = d.overagePct
-            let oR = d.overageReset
-            let daysInMonth = Double(Calendar.current.range(of: .day, in: .month, for: Date())?.count ?? 30)
-            let oT = elapsedPct(resetTs: oR, windowSecs: daysInMonth * 24 * 3600)
-            extraView.setTitle("Extra usage", suffix: "$\(String(format: "%.2f", d.extraDollars))")
-            extraView.setData(value: "\(Int(oU))%", usageFrac: oU / 100, timeFrac: oT / 100, resetStr: "Resets in \(fmtReset(oR))")
-            extraItem.isHidden = false
-        } else {
-            extraItem.isHidden = true
-        }
-    }
-
-    // MARK: - Auth visibility
-
-    private func updateAuthVisibility() {
-        let loggedIn = loadSession() != nil
-        loginItem.isHidden = !claudeEnabled || (loggedIn && !authFailed)
-        logoutItem.isHidden = !claudeEnabled || !loggedIn
-        for item in claudeItems { item.isHidden = !claudeEnabled }
-        fableItem.isHidden = !claudeEnabled || !(claudeSnapshot?.fableEnabled ?? false)
-        extraItem.isHidden = !claudeEnabled || !(claudeSnapshot?.extraEnabled ?? false)
-        for item in codexItems { item.isHidden = !codexEnabled }
-        for item in [antigravityHeader!, antigravityUpdatedItem!] + antigravityMetricItems { item.isHidden = !antigravityEnabled }
-        providerSeparator.isHidden = !claudeEnabled || !codexEnabled
-        antigravitySeparator.isHidden = !antigravityEnabled || !(claudeEnabled || codexEnabled)
-        emptyItem.isHidden = claudeEnabled || codexEnabled || antigravityEnabled
-        claudeToggle.state = claudeEnabled ? .on : .off
-        codexToggle.state = codexEnabled ? .on : .off
-        antigravityToggle.state = antigravityEnabled ? .on : .off
-        for (toggle, enabled, shown) in [(iconClaudeToggle!, claudeEnabled, iconShowsClaude),
-                                         (iconCodexToggle!, codexEnabled, iconShowsCodex),
-                                         (iconAntigravityToggle!, antigravityEnabled, iconShowsAntigravity)] {
-            toggle.state = shown ? .on : .off
-            toggle.isEnabled = enabled
-            toggle.toolTip = enabled ? nil : "Turn this provider on in Providers first."
-        }
-    }
-
-    // MARK: - Antigravity
-
-    private func antigravityUsed(_ limit: AntigravityUsage.Limit) -> Double {
-        limit.resetsAt < Date().timeIntervalSince1970 ? 0 : limit.usedPercent
-    }
-
-    private func antigravityElapsed(_ limit: AntigravityUsage.Limit) -> Double {
-        limit.windowSecs.map { elapsedPct(resetTs: limit.resetsAt, windowSecs: $0) } ?? 0
-    }
-
-    /// Antigravity reports a variable set of limits, so its rows follow the
-    /// latest response instead of being fixed at build time.
-    private func syncAntigravityMetrics() {
-        guard let menu = antigravityUpdatedItem.menu else { return }
-        let titles = antigravityUsage?.limits.map(\.title) ?? ["Usage"]
-        let current = antigravityMetricItems.compactMap { ($0.view as? MetricMenuView)?.title }
-        if titles != current {
-            for item in antigravityMetricItems { menu.removeItem(item) }
-            antigravityMetricItems = titles.map { title in
-                let item = NSMenuItem()
-                item.view = MetricMenuView(title: title, fill: antigravityTeal)
-                item.isHidden = !antigravityEnabled
-                return item
-            }
-            let index = menu.index(of: antigravityUpdatedItem)
-            for (offset, item) in antigravityMetricItems.enumerated() { menu.insertItem(item, at: index + offset) }
-        }
-        let views = antigravityMetricItems.compactMap { $0.view as? MetricMenuView }
-        if let usage = antigravityUsage {
-            for (view, limit) in zip(views, usage.limits) {
-                let used = antigravityUsed(limit)
-                view.setData(value: "\(Int(used.rounded()))%", usageFrac: used / 100,
-                             timeFrac: antigravityElapsed(limit) / 100, resetStr: "Resets in \(fmtReset(limit.resetsAt))")
-            }
-            antigravityUpdatedItem.title = antigravityError == nil ? "Updated \(fmtAgo(usage.fetchedAt))  ↻" : "Saved usage — details…"
-            antigravityUpdatedItem.toolTip = antigravityError.map { "\($0)\n\nShowing saved usage from \(fmtAgo(usage.fetchedAt))." }
-        } else {
-            views.first?.setData(value: "—", usageFrac: 0, timeFrac: 0, resetStr: "Waiting for usage")
-            antigravityUpdatedItem.title = antigravityError == nil ? "Refreshing…" : "Connect Antigravity — details…"
-            antigravityUpdatedItem.toolTip = antigravityError
-        }
-        if antigravityLoading { antigravityUpdatedItem.title = "Refreshing…" }
-    }
-
-    private func triggerAntigravityFetch() {
-        guard antigravityEnabled, !antigravityLoading else { return }
-        antigravityLoading = true
-        antigravityUpdatedItem.title = "Refreshing…"
-        DispatchQueue.global().async { [weak self] in
-            let result = Result { try AntigravityUsage.fetch() }
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.antigravityLoading = false
-                guard self.antigravityEnabled else { return }
-                switch result {
-                case .success(let usage):
-                    self.antigravityUsage = usage
-                    if let data = try? JSONEncoder().encode(usage) { UserDefaults.standard.set(data, forKey: "antigravityUsage") }
-                    self.antigravityError = nil
-                case .failure(let error):
-                    self.antigravityError = error.localizedDescription
-                }
-                self.updateRelativeTime()
-            }
-        }
-    }
-
-    // MARK: - Relative time
-
-    private func updateRelativeTime() {
-        if claudeEnabled, let snapshot = claudeSnapshot { applySnapshot(snapshot) }
-        if lastFetched > 0, !loading, !authFailed, claudeError == nil {
-            updatedItem.title = "Updated \(fmtAgo(lastFetched))  ↻"
-        }
-        if let usage = codexUsage {
-            codexView.setData(value: "\(Int(usage.usedPercent))%", usageFrac: usage.usedPercent / 100,
-                              timeFrac: elapsedPct(resetTs: usage.resetsAt, windowSecs: usage.windowDurationMins * 60) / 100,
-                              resetStr: "Resets in \(fmtReset(usage.resetsAt))")
-            codexUpdatedItem.title = codexError == nil ? "Updated \(fmtAgo(usage.fetchedAt))  ↻" : "Saved usage — details…"
-            codexUpdatedItem.toolTip = codexError.map { "\($0)\n\nShowing saved usage from \(fmtAgo(usage.fetchedAt))." }
-        } else {
-            codexView.setData(value: "—", usageFrac: 0, timeFrac: 0, resetStr: "Waiting for usage")
-            codexUpdatedItem.title = codexError == nil ? "Refreshing…" : "Connect Codex — details…"
-            codexUpdatedItem.toolTip = codexError
-        }
-        if codexLoading { codexUpdatedItem.title = "Refreshing…" }
-        syncAntigravityMetrics()
-        updateAuthVisibility()
-        updateIcon()
+        refreshUI()
     }
 
     private func triggerCodexFetch() {
         guard codexEnabled, !codexLoading else { return }
         codexLoading = true
-        codexUpdatedItem.title = "Refreshing…"
+        refreshUI()
         DispatchQueue.global().async { [weak self] in
             let result = Result { try CodexUsage.fetch() }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.codexLoading = false
-                guard self.codexEnabled else { return }
-                switch result {
-                case .success(let usage):
-                    self.codexUsage = usage
-                    if let data = try? JSONEncoder().encode(usage) { UserDefaults.standard.set(data, forKey: "codexUsage") }
-                    self.codexError = nil
-                case .failure(let error):
-                    self.codexError = error.localizedDescription
+                if self.codexEnabled {
+                    switch result {
+                    case .success(let usage):
+                        self.codexUsage = usage
+                        if let data = try? JSONEncoder().encode(usage) { UserDefaults.standard.set(data, forKey: "codexUsage") }
+                        self.codexError = nil
+                    case .failure(let error):
+                        self.codexError = error.localizedDescription
+                    }
                 }
-                self.updateRelativeTime()
+                self.refreshUI()
             }
         }
     }
 
-    // MARK: - Actions
-
-    func menuWillOpen(_ menu: NSMenu) {
-        updateRelativeTime()
+    private func triggerAntigravityFetch() {
+        guard antigravityEnabled, !antigravityLoading else { return }
+        antigravityLoading = true
+        refreshUI()
+        DispatchQueue.global().async { [weak self] in
+            let result = Result { try AntigravityUsage.fetch() }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.antigravityLoading = false
+                if self.antigravityEnabled {
+                    switch result {
+                    case .success(let usage):
+                        self.antigravityUsage = usage
+                        if let data = try? JSONEncoder().encode(usage) { UserDefaults.standard.set(data, forKey: "antigravityUsage") }
+                        self.antigravityError = nil
+                    case .failure(let error):
+                        self.antigravityError = error.localizedDescription
+                    }
+                }
+                self.refreshUI()
+            }
+        }
     }
+
+    // MARK: - Providers
 
     private func setClaudeEnabled(_ enabled: Bool) {
         claudeEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: "claudeEnabled")
         UserDefaults.standard.set(true, forKey: "providerWelcomeShown")
-        updateAuthVisibility()
-        updateIcon()
+        refreshUI()
     }
 
     private func setCodexEnabled(_ enabled: Bool) {
         codexEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: "codexEnabled")
         UserDefaults.standard.set(true, forKey: "providerWelcomeShown")
-        updateAuthVisibility()
-        updateIcon()
-    }
-
-    @objc private func toggleClaude() {
-        setClaudeEnabled(!claudeEnabled)
-        if claudeEnabled {
-            if loadSession() == nil || authFailed { loginClicked() }
-            else { triggerFetch(isBackground: false) }
-        }
-    }
-
-    @objc private func toggleCodex() {
-        setCodexEnabled(!codexEnabled)
-        if codexEnabled { triggerCodexFetch() }
+        refreshUI()
     }
 
     private func setAntigravityEnabled(_ enabled: Bool) {
         antigravityEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: "antigravityEnabled")
         UserDefaults.standard.set(true, forKey: "providerWelcomeShown")
-        updateAuthVisibility()
-        updateIcon()
+        refreshUI()
+    }
+
+    @objc private func toggleClaude() {
+        setClaudeEnabled(!claudeEnabled)
+        if claudeEnabled {
+            if loadSession() == nil || authFailed { panel.close(); loginClicked() }
+            else { triggerFetch() }
+        }
+    }
+
+    @objc private func toggleCodex() {
+        setCodexEnabled(!codexEnabled)
+        if codexEnabled { triggerCodexFetch() }
     }
 
     @objc private func toggleAntigravity() {
@@ -559,22 +510,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleIconClaude() {
         iconShowsClaude.toggle()
         UserDefaults.standard.set(iconShowsClaude, forKey: "iconShowsClaude")
-        updateAuthVisibility(); updateIcon()
+        refreshUI()
     }
 
     @objc private func toggleIconCodex() {
         iconShowsCodex.toggle()
         UserDefaults.standard.set(iconShowsCodex, forKey: "iconShowsCodex")
-        updateAuthVisibility(); updateIcon()
+        refreshUI()
     }
 
     @objc private func toggleIconAntigravity() {
         iconShowsAntigravity.toggle()
         UserDefaults.standard.set(iconShowsAntigravity, forKey: "iconShowsAntigravity")
-        updateAuthVisibility(); updateIcon()
+        refreshUI()
     }
 
-    @objc private func showProviderWelcome() { showWelcome() }
+    // MARK: - Actions
 
     private func showError(provider: String, message: String, fetchedAt: TimeInterval, retry: () -> Void) {
         let alert = NSAlert()
@@ -586,28 +537,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if alert.runModal() == .alertFirstButtonReturn { retry() }
     }
 
-    @objc private func claudeStatusClicked() {
-        if authFailed { loginClicked() }
-        else if let error = claudeError {
-            showError(provider: "Claude", message: error, fetchedAt: lastFetched) { triggerFetch(isBackground: false) }
-        } else { triggerFetch(isBackground: false) }
-    }
+    @objc private func refreshClicked() { refreshAll() }
 
-    @objc private func codexStatusClicked() {
-        if let error = codexError {
-            showError(provider: "Codex", message: error, fetchedAt: codexUsage?.fetchedAt ?? 0) { triggerCodexFetch() }
-        } else { triggerCodexFetch() }
-    }
-
-    @objc private func antigravityStatusClicked() {
-        if let error = antigravityError {
-            showError(provider: "Antigravity", message: error, fetchedAt: antigravityUsage?.fetchedAt ?? 0) { triggerAntigravityFetch() }
-        } else { triggerAntigravityFetch() }
-    }
-
-    @objc private func refreshClicked() { triggerFetch(isBackground: false); triggerCodexFetch(); triggerAntigravityFetch() }
-
-    @objc private func wakeRefresh() { triggerFetch(isBackground: true); triggerCodexFetch(); triggerAntigravityFetch() }
+    @objc private func wakeRefresh() { refreshAll() }
 
     private func showWelcome() {
         welcomeWindow?.close()
@@ -625,6 +557,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func loginClicked() {
+        panel?.close()
         guard loginWindow == nil else { loginWindow?.show(); return }
         loginWindow = LoginWindow(
             onSuccess: { [weak self] sessionKey, orgId in
@@ -633,8 +566,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self?.setClaudeEnabled(true)
                 self?.authFailed = false
                 self?.loginWindow = nil
-                self?.updateAuthVisibility()
-                self?.triggerFetch(isBackground: false)
+                self?.triggerFetch()
             },
             onCancel: { [weak self] in
                 self?.loginWindow = nil
@@ -648,25 +580,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         clearSession()
         clearSnapshot()
         claudeSnapshot = nil
-        lastSU = 0; lastST = 0; lastWU = 0; lastWT = 0; lastFU = 0; lastFT = 0
+        claudeError = nil
         authFailed = true
         lastFetched = 0
-        updateIcon()
-        updatedItem.title = "Not logged in  \u{26a0}"
-        sessionView.setData(value: "\u{2014}", usageFrac: 0, timeFrac: 0, resetStr: "\u{2014}")
-        weeklyView.setData(value: "\u{2014}", usageFrac: 0, timeFrac: 0, resetStr: "\u{2014}")
-        fableItem.isHidden = true
-        extraItem.isHidden = true
         setClaudeEnabled(false)
-        updateAuthVisibility()
     }
 
     @objc private func toggleLaunchAtLogin() {
         LaunchAtLogin.toggle()
-        launchAtLoginItem.state = LaunchAtLogin.isEnabled ? .on : .off
     }
 
     @objc private func aboutClicked() {
+        panel.close()
         NSApp.orderFrontStandardAboutPanel(options: [
             .credits: NSAttributedString(
                 string: "github.com/elomid/tokenio",

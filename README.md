@@ -16,21 +16,21 @@ Choose a provider on the welcome screen:
 - **Codex:** Install the Codex CLI, sign in with `codex login`, then click **Use Codex** in Tokenio.
 - **Antigravity:** Install the Antigravity CLI (`agy`, version 1.1.11 or later), sign in by running `agy` once in Terminal, then click **Use Antigravity** in Tokenio.
 
-Use **Providers** in the menu to turn each account on or off. Your choices are saved; hidden providers aren't checked for usage.
+Click the menu bar icon to see your usage. Use **Providers** under the **•••** button to turn each account on or off. Your choices are saved; hidden providers aren't checked for usage.
 
 Use **Menu Bar Icon** to choose which enabled providers get a bar in the menu bar icon. For example, show Claude and Antigravity in the icon while keeping Codex in the menu.
 
-Launch at Login is enabled on first run. You can turn it off in the menu.
+Launch at Login is enabled on first run. You can turn it off under **•••**.
 
 ## What it shows
 
 - **Claude:** Current session and weekly usage, plus Fable usage and extra spending when available.
-- **Codex:** Weekly usage from your existing CLI login.
-- **Antigravity:** Every limit the CLI reports, such as the 5-hour and weekly limits for Gemini and for Claude and GPT models. The menu bar icon shows the limit closest to running out.
+- **Codex:** Usage window from your existing CLI login (weekly, or the plan's longest window such as 30-day).
+- **Antigravity:** Google model limits reported by `agy`, such as the 5-hour and weekly Gemini limits (Claude and GPT groups are hidden since Tokenio tracks them directly). The menu bar icon shows the primary 5-hour and weekly limits.
 
-Each bar shows usage and time until reset. The notch marks elapsed time in the usage window so you can judge your pace. Claude bars are monochrome, Fable is blue, Codex is purple, and Antigravity is teal.
+Each limit is a vertical bar, grouped by provider, in both the menu bar icon and the panel. The fill shows how much is used, and the mark shows how much of the window has passed, so you can judge your pace. Under each bar is the time until it resets. Choose **Show › Left** under **•••** if you'd rather see what's left.
 
-Usage refreshes every five minutes and when your Mac wakes. Click the update time to refresh manually. If a refresh fails, saved usage stays visible; click **details…** for the error and a retry button.
+Usage refreshes every five minutes and when your Mac wakes. Click **Updated** at the bottom of the panel to refresh every provider. If a refresh fails, saved usage stays visible with a warning sign next to the provider's name; click it for the error and a retry button.
 
 ## Update
 

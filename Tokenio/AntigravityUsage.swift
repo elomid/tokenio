@@ -12,14 +12,6 @@ struct AntigravityUsage: Codable {
     let limits: [Limit]
     var fetchedAt: TimeInterval = Date().timeIntervalSince1970
 
-    /// The limit closest to running out, shown in the menu bar icon.
-    var tightest: Limit? {
-        limits.reduce(nil) { best, limit in
-            guard let best else { return limit }
-            return limit.usedPercent > best.usedPercent ? limit : best
-        }
-    }
-
     static var cached: AntigravityUsage? {
         guard let data = UserDefaults.standard.data(forKey: "antigravityUsage") else { return nil }
         return try? JSONDecoder().decode(Self.self, from: data)

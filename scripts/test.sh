@@ -14,10 +14,10 @@ import sys
 out = Path(sys.argv[1])
 s = Path('Tokenio/TokenioApp.swift').read_text().replace('@main\n', '')
 s = s.replace('loadSession()', 'testSession()')
-s += '\nfunc testSession() -> Session? { nil }\n'
+s += '\nvar testSessionValue: Session? = nil\nfunc testSession() -> Session? { testSessionValue }\n'
 s += Path('Tests/MenuChecks.swift').read_text()
 (out / 'TokenioApp.swift').write_text(s)
 (out / 'main.swift').write_text('import AppKit\nAppDelegate.runMenuChecks()\n')
 PY
-swiftc "$TEST_DIR/TokenioApp.swift" "$TEST_DIR/main.swift" Tokenio/CodexUsage.swift Tokenio/AntigravityUsage.swift Tokenio/UsageService.swift Tokenio/MetricMenuView.swift Tokenio/BarRenderer.swift Tokenio/LoginWindow.swift Tokenio/WelcomeWindow.swift -o "$TEST_DIR/menu-tests"
+swiftc "$TEST_DIR/TokenioApp.swift" "$TEST_DIR/main.swift" Tokenio/CodexUsage.swift Tokenio/AntigravityUsage.swift Tokenio/UsageService.swift Tokenio/UsagePanel.swift Tokenio/BarRenderer.swift Tokenio/LoginWindow.swift Tokenio/WelcomeWindow.swift -o "$TEST_DIR/menu-tests"
 "$TEST_DIR/menu-tests"

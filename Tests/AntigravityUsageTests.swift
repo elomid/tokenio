@@ -53,7 +53,6 @@ struct AntigravityUsageTests {
         precondition(abs(usage.limits[1].usedPercent - 3) < 0.001 && usage.limits[1].windowSecs == 7 * 86400)
         precondition(usage.limits[2].usedPercent == 0, "Remaining fraction above 1 clamps to 0% used")
         precondition(usage.limits[3].windowSecs == nil)
-        precondition(usage.tightest?.title == "5-hour - Gemini")
         let calls = try String(contentsOf: log, encoding: .utf8)
         precondition(calls == "--version\n-p /usage --output-format json\n", calls)
 
