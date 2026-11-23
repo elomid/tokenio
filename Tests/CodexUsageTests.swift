@@ -41,6 +41,9 @@ struct CodexUsageTests {
         catch {}
         let legacy = try CodexUsage.parse(["rateLimits": ["primary": ["windowDurationMins": 10080, "usedPercent": 120, "resetsAt": 1900000000]]])
         precondition(legacy.usedPercent == 100)
+        // Plans without a weekly window (e.g. a 30-day limit) still report usage.
+        let monthly = try CodexUsage.parse(["rateLimitsByLimitId": ["codex": ["primary": ["windowDurationMins": 43200, "usedPercent": 35, "resetsAt": 1900000000], "secondary": NSNull()]]])
+        precondition(monthly.usedPercent == 35 && monthly.windowDurationMins == 43200)
         let launcher = temp.appendingPathComponent(".local/bin/codex")
         let root = temp.appendingPathComponent(".local/lib/node_modules/@openai/codex")
         try FileManager.default.createDirectory(at: launcher.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -58,6 +61,6 @@ struct CodexUsageTests {
         try FileManager.default.createDirectory(at: native.deletingLastPathComponent(), withIntermediateDirectories: true)
         try FileManager.default.copyItem(at: success, to: native)
         precondition(CodexUsage.executableURL(home: temp.path, environment: ["PATH": "/usr/bin:/bin"]) == native)
-        print("PASS: npm native resolution; fragmented responses; quota selection; login errors; bounded timeout; early exit; absent quota; percent clamping")
+        print("PASS: npm native resolution; fragmented responses; quota selection; login errors; bounded timeout; early exit; absent quota; percent clamping; non-weekly windows")
     }
 }

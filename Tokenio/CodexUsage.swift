@@ -123,14 +123,18 @@ struct CodexUsage: Codable {
     static func parse(_ result: [String: Any]) throws -> CodexUsage {
         let buckets = result["rateLimitsByLimitId"] as? [String: Any]
         let bucket = (buckets?["codex"] as? [String: Any]) ?? (result["rateLimits"] as? [String: Any])
-        for key in ["primary", "secondary"] {
+        let windows = ["primary", "secondary"].compactMap { key -> CodexUsage? in
             guard let window = bucket?[key] as? [String: Any],
-                  let minutes = (window["windowDurationMins"] as? NSNumber)?.doubleValue, minutes == 10080,
+                  let minutes = (window["windowDurationMins"] as? NSNumber)?.doubleValue, minutes > 0,
                   let percent = (window["usedPercent"] as? NSNumber)?.doubleValue, percent.isFinite,
-                  let reset = (window["resetsAt"] as? NSNumber)?.doubleValue, reset > 0 else { continue }
+                  let reset = (window["resetsAt"] as? NSNumber)?.doubleValue, reset > 0 else { return nil }
             return CodexUsage(usedPercent: max(0, min(100, percent)), resetsAt: reset, windowDurationMins: minutes)
         }
-        throw failure("No Codex weekly quota — check codex login")
+        // Prefer the weekly limit; plans without one (such as a 30-day limit) use their longest window.
+        if let usage = windows.first(where: { $0.windowDurationMins == 10080 }) ?? windows.max(by: { $0.windowDurationMins < $1.windowDurationMins }) {
+            return usage
+        }
+        throw failure("No Codex usage limit found — check codex login")
     }
 
     private static func failure(_ message: String) -> NSError {
