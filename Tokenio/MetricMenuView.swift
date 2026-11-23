@@ -5,7 +5,7 @@ private let menuPad: CGFloat = 16
 private let viewH: CGFloat = 72
 
 class MetricMenuView: NSView {
-    private var title: String
+    private(set) var title: String
     private var titleSuffix: String = ""
     private var value: String = "—"
     private var usageFrac: Double = 0

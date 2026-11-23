@@ -20,6 +20,8 @@ let codexPurple = NSColor(red: 0.72, green: 0.48, blue: 1.0, alpha: 1.0)
 
 let fableBlue = NSColor(red: 0.35, green: 0.62, blue: 1.0, alpha: 1.0)
 
+let antigravityTeal = NSColor(red: 0.20, green: 0.80, blue: 0.72, alpha: 1.0)
+
 private let colorNormal: (CGFloat, CGFloat, CGFloat, CGFloat) = (0.25, 0.85, 0.35, 1.0)  // green
 private let colorWarn:   (CGFloat, CGFloat, CGFloat, CGFloat) = (1.0,  0.45, 0.10, 1.0)  // orange (≥90%)
 private let colorCrit:   (CGFloat, CGFloat, CGFloat, CGFloat) = (1.0,  0.25, 0.20, 1.0)  // red (100%)
@@ -112,23 +114,28 @@ func drawBarMonochrome(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat,
 
 func makeIcon(sUsage: Double, sTime: Double, wUsage: Double, wTime: Double,
               fUsage: Double = 0, fTime: Double = 0, showFable: Bool = false, showClaude: Bool = true, showCodex: Bool = true,
-              isDark: Bool = true, cUsage: Double = 0, cTime: Double = 0) -> NSImage {
+              isDark: Bool = true, cUsage: Double = 0, cTime: Double = 0,
+              showAntigravity: Bool = false, aUsage: Double = 0, aTime: Double = 0) -> NSImage {
     var bars: [(Double, Double, NSColor?)] = []
     if showClaude {
         bars += [(sUsage, sTime, nil), (wUsage, wTime, nil)]
         if showFable { bars.append((fUsage, fTime, fableBlue)) }
     }
     if showCodex { bars.append((cUsage, cTime, codexPurple)) }
+    if showAntigravity { bars.append((aUsage, aTime, antigravityTeal)) }
     guard !bars.isEmpty else {
         let image = NSImage(systemSymbolName: "chart.bar", accessibilityDescription: "Choose a provider") ?? NSImage()
         image.isTemplate = true
         return image
     }
     let img = NSImage(size: NSSize(width: iconW, height: iconH), flipped: false) { _ in
-        let top = (iconH + CGFloat(bars.count - 1) * 6 - 4) / 2
+        // Up to four bars fit at full size; five slim down to stay within the icon.
+        let height: CGFloat = bars.count > 4 ? 3 : 4
+        let step: CGFloat = bars.count > 4 ? 4.5 : 6
+        let top = (iconH + CGFloat(bars.count - 1) * step - height) / 2
         for (index, bar) in bars.enumerated() {
-            drawBarMonochrome(x: barX0, y: top - CGFloat(index * 6), w: barW, h: 4,
-                              corner: 2, fillFrac: bar.0 / 100, tickFrac: bar.1 / 100,
+            drawBarMonochrome(x: barX0, y: top - CGFloat(index) * step, w: barW, h: height,
+                              corner: height / 2, fillFrac: bar.0 / 100, tickFrac: bar.1 / 100,
                               bgAlpha: iconBgAlpha, isDark: isDark, fill: bar.2)
         }
         return true

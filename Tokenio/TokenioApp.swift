@@ -13,13 +13,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var claudeEnabled = UserDefaults.standard.object(forKey: "claudeEnabled") as? Bool ?? (loadSession() != nil)
     private var codexEnabled = UserDefaults.standard.object(forKey: "codexEnabled") as? Bool ?? (CodexUsage.cached != nil)
+    private var antigravityEnabled = UserDefaults.standard.object(forKey: "antigravityEnabled") as? Bool ?? (AntigravityUsage.cached != nil)
+    // Which enabled providers get a bar in the menu bar icon.
+    private var iconShowsClaude = UserDefaults.standard.object(forKey: "iconShowsClaude") as? Bool ?? true
+    private var iconShowsCodex = UserDefaults.standard.object(forKey: "iconShowsCodex") as? Bool ?? true
+    private var iconShowsAntigravity = UserDefaults.standard.object(forKey: "iconShowsAntigravity") as? Bool ?? true
     private var claudeItems: [NSMenuItem] = []
     private var codexItems: [NSMenuItem] = []
     private var providerSeparator: NSMenuItem!
+    private var antigravitySeparator: NSMenuItem!
+    private var antigravityHeader: NSMenuItem!
+    private var antigravityMetricItems: [NSMenuItem] = []
+    private var antigravityUpdatedItem: NSMenuItem!
+    private var antigravityUsage = AntigravityUsage.cached
+    private var antigravityLoading = false
+    private var antigravityError: String?
     private var usageSeparator: NSMenuItem!
     private var emptyItem: NSMenuItem!
     private var claudeToggle: NSMenuItem!
     private var codexToggle: NSMenuItem!
+    private var antigravityToggle: NSMenuItem!
+    private var iconClaudeToggle: NSMenuItem!
+    private var iconCodexToggle: NSMenuItem!
+    private var iconAntigravityToggle: NSMenuItem!
     private var claudeGeneration = 0
     private var codexView: MetricMenuView!
     private var codexUpdatedItem: NSMenuItem!
@@ -69,6 +85,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         buildMenu()
         triggerCodexFetch()
+        triggerAntigravityFetch()
 
         if claudeEnabled, loadSession() != nil {
             // Logged in — show snapshot immediately if available, then refresh
@@ -86,7 +103,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         updateAuthVisibility()
         updateRelativeTime()
-        if !claudeEnabled && !codexEnabled && !UserDefaults.standard.bool(forKey: "providerWelcomeShown") {
+        if !claudeEnabled && !codexEnabled && !antigravityEnabled && !UserDefaults.standard.bool(forKey: "providerWelcomeShown") {
             UserDefaults.standard.set(true, forKey: "providerWelcomeShown")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.showWelcome() }
         }
@@ -94,6 +111,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         fetchTimer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
             self?.triggerFetch(isBackground: true)
             self?.triggerCodexFetch()
+            self?.triggerAntigravityFetch()
         }
         RunLoop.main.add(fetchTimer!, forMode: .common)
 
@@ -162,6 +180,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         codexUpdatedItem.target = self
         menu.addItem(codexUpdatedItem)
         codexItems = Array(menu.items.dropFirst(codexStart))
+        antigravitySeparator = .separator()
+        menu.addItem(antigravitySeparator)
+        antigravityHeader = NSMenuItem()
+        antigravityHeader.view = SectionHeaderView(title: "Antigravity")
+        menu.addItem(antigravityHeader)
+        antigravityUpdatedItem = NSMenuItem(title: "Refreshing…", action: #selector(antigravityStatusClicked), keyEquivalent: "")
+        antigravityUpdatedItem.target = self
+        menu.addItem(antigravityUpdatedItem)
+        syncAntigravityMetrics()
         emptyItem = NSMenuItem(title: "Choose a provider to get started", action: #selector(showProviderWelcome), keyEquivalent: "")
         emptyItem.target = self
         menu.addItem(emptyItem)
@@ -172,10 +199,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         providers.autoenablesItems = false
         claudeToggle = NSMenuItem(title: "Claude", action: #selector(toggleClaude), keyEquivalent: "")
         codexToggle = NSMenuItem(title: "Codex", action: #selector(toggleCodex), keyEquivalent: "")
-        for item in [claudeToggle!, codexToggle!] { item.target = self; providers.addItem(item) }
+        antigravityToggle = NSMenuItem(title: "Antigravity", action: #selector(toggleAntigravity), keyEquivalent: "")
+        for item in [claudeToggle!, codexToggle!, antigravityToggle!] { item.target = self; providers.addItem(item) }
         let providerItem = NSMenuItem(title: "Providers", action: nil, keyEquivalent: "")
         providerItem.submenu = providers
         menu.addItem(providerItem)
+
+        let iconProviders = NSMenu()
+        iconProviders.autoenablesItems = false
+        iconClaudeToggle = NSMenuItem(title: "Claude", action: #selector(toggleIconClaude), keyEquivalent: "")
+        iconCodexToggle = NSMenuItem(title: "Codex", action: #selector(toggleIconCodex), keyEquivalent: "")
+        iconAntigravityToggle = NSMenuItem(title: "Antigravity", action: #selector(toggleIconAntigravity), keyEquivalent: "")
+        for item in [iconClaudeToggle!, iconCodexToggle!, iconAntigravityToggle!] { item.target = self; iconProviders.addItem(item) }
+        let iconItem = NSMenuItem(title: "Menu Bar Icon", action: nil, keyEquivalent: "")
+        iconItem.submenu = iconProviders
+        menu.addItem(iconItem)
 
         loginItem = NSMenuItem(title: "Log in to Claude\u{2026}", action: #selector(loginClicked), keyEquivalent: "")
         loginItem.target = self
@@ -211,15 +249,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.button?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
     }
 
+    private var iconClaude: Bool { claudeEnabled && iconShowsClaude }
+    private var iconCodex: Bool { codexEnabled && iconShowsCodex }
+    private var iconAntigravity: Bool { antigravityEnabled && iconShowsAntigravity }
+
     private func updateIcon() {
-        // Keep Codex visible even when Claude is disconnected.
+        // Keep Codex and Antigravity visible even when Claude is disconnected.
+        let tightest = antigravityUsage?.tightest
         statusItem.button?.image = makeIcon(
             sUsage: lastSU, sTime: lastST, wUsage: lastWU, wTime: lastWT,
-            fUsage: lastFU, fTime: lastFT, showFable: lastShowFable, showClaude: claudeEnabled, showCodex: codexEnabled,
+            fUsage: lastFU, fTime: lastFT, showFable: lastShowFable, showClaude: iconClaude, showCodex: iconCodex,
             isDark: isDarkMenuBar, cUsage: codexUsage?.usedPercent ?? 0,
-            cTime: codexUsage.map { elapsedPct(resetTs: $0.resetsAt, windowSecs: $0.windowDurationMins * 60) } ?? 0)
-        let providers = [claudeEnabled ? "Claude: session, weekly" : nil, codexEnabled ? "Codex: weekly (purple)" : nil].compactMap { $0 }
-        statusItem.button?.toolTip = providers.isEmpty ? "Tokenio — choose a provider" : providers.joined(separator: " · ")
+            cTime: codexUsage.map { elapsedPct(resetTs: $0.resetsAt, windowSecs: $0.windowDurationMins * 60) } ?? 0,
+            showAntigravity: iconAntigravity, aUsage: tightest.map(antigravityUsed) ?? 0,
+            aTime: tightest.map(antigravityElapsed) ?? 0)
+        let providers = [iconClaude ? "Claude: session, weekly" : nil, iconCodex ? "Codex: weekly (purple)" : nil,
+                         iconAntigravity ? "Antigravity: tightest limit (teal)" : nil].compactMap { $0 }
+        let anyEnabled = claudeEnabled || codexEnabled || antigravityEnabled
+        statusItem.button?.toolTip = providers.isEmpty
+            ? (anyEnabled ? "Tokenio — choose providers in Menu Bar Icon" : "Tokenio — choose a provider")
+            : providers.joined(separator: " · ")
         statusItem.button?.imageScaling = .scaleProportionallyDown
     }
 
@@ -329,10 +378,87 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         fableItem.isHidden = !claudeEnabled || !(claudeSnapshot?.fableEnabled ?? false)
         extraItem.isHidden = !claudeEnabled || !(claudeSnapshot?.extraEnabled ?? false)
         for item in codexItems { item.isHidden = !codexEnabled }
+        for item in [antigravityHeader!, antigravityUpdatedItem!] + antigravityMetricItems { item.isHidden = !antigravityEnabled }
         providerSeparator.isHidden = !claudeEnabled || !codexEnabled
-        emptyItem.isHidden = claudeEnabled || codexEnabled
+        antigravitySeparator.isHidden = !antigravityEnabled || !(claudeEnabled || codexEnabled)
+        emptyItem.isHidden = claudeEnabled || codexEnabled || antigravityEnabled
         claudeToggle.state = claudeEnabled ? .on : .off
         codexToggle.state = codexEnabled ? .on : .off
+        antigravityToggle.state = antigravityEnabled ? .on : .off
+        for (toggle, enabled, shown) in [(iconClaudeToggle!, claudeEnabled, iconShowsClaude),
+                                         (iconCodexToggle!, codexEnabled, iconShowsCodex),
+                                         (iconAntigravityToggle!, antigravityEnabled, iconShowsAntigravity)] {
+            toggle.state = shown ? .on : .off
+            toggle.isEnabled = enabled
+            toggle.toolTip = enabled ? nil : "Turn this provider on in Providers first."
+        }
+    }
+
+    // MARK: - Antigravity
+
+    private func antigravityUsed(_ limit: AntigravityUsage.Limit) -> Double {
+        limit.resetsAt < Date().timeIntervalSince1970 ? 0 : limit.usedPercent
+    }
+
+    private func antigravityElapsed(_ limit: AntigravityUsage.Limit) -> Double {
+        limit.windowSecs.map { elapsedPct(resetTs: limit.resetsAt, windowSecs: $0) } ?? 0
+    }
+
+    /// Antigravity reports a variable set of limits, so its rows follow the
+    /// latest response instead of being fixed at build time.
+    private func syncAntigravityMetrics() {
+        guard let menu = antigravityUpdatedItem.menu else { return }
+        let titles = antigravityUsage?.limits.map(\.title) ?? ["Usage"]
+        let current = antigravityMetricItems.compactMap { ($0.view as? MetricMenuView)?.title }
+        if titles != current {
+            for item in antigravityMetricItems { menu.removeItem(item) }
+            antigravityMetricItems = titles.map { title in
+                let item = NSMenuItem()
+                item.view = MetricMenuView(title: title, fill: antigravityTeal)
+                item.isHidden = !antigravityEnabled
+                return item
+            }
+            let index = menu.index(of: antigravityUpdatedItem)
+            for (offset, item) in antigravityMetricItems.enumerated() { menu.insertItem(item, at: index + offset) }
+        }
+        let views = antigravityMetricItems.compactMap { $0.view as? MetricMenuView }
+        if let usage = antigravityUsage {
+            for (view, limit) in zip(views, usage.limits) {
+                let used = antigravityUsed(limit)
+                view.setData(value: "\(Int(used.rounded()))%", usageFrac: used / 100,
+                             timeFrac: antigravityElapsed(limit) / 100, resetStr: "Resets in \(fmtReset(limit.resetsAt))")
+            }
+            antigravityUpdatedItem.title = antigravityError == nil ? "Updated \(fmtAgo(usage.fetchedAt))  ↻" : "Saved usage — details…"
+            antigravityUpdatedItem.toolTip = antigravityError.map { "\($0)\n\nShowing saved usage from \(fmtAgo(usage.fetchedAt))." }
+        } else {
+            views.first?.setData(value: "—", usageFrac: 0, timeFrac: 0, resetStr: "Waiting for usage")
+            antigravityUpdatedItem.title = antigravityError == nil ? "Refreshing…" : "Connect Antigravity — details…"
+            antigravityUpdatedItem.toolTip = antigravityError
+        }
+        if antigravityLoading { antigravityUpdatedItem.title = "Refreshing…" }
+    }
+
+    private func triggerAntigravityFetch() {
+        guard antigravityEnabled, !antigravityLoading else { return }
+        antigravityLoading = true
+        antigravityUpdatedItem.title = "Refreshing…"
+        DispatchQueue.global().async { [weak self] in
+            let result = Result { try AntigravityUsage.fetch() }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.antigravityLoading = false
+                guard self.antigravityEnabled else { return }
+                switch result {
+                case .success(let usage):
+                    self.antigravityUsage = usage
+                    if let data = try? JSONEncoder().encode(usage) { UserDefaults.standard.set(data, forKey: "antigravityUsage") }
+                    self.antigravityError = nil
+                case .failure(let error):
+                    self.antigravityError = error.localizedDescription
+                }
+                self.updateRelativeTime()
+            }
+        }
     }
 
     // MARK: - Relative time
@@ -354,6 +480,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             codexUpdatedItem.toolTip = codexError
         }
         if codexLoading { codexUpdatedItem.title = "Refreshing…" }
+        syncAntigravityMetrics()
         updateAuthVisibility()
         updateIcon()
     }
@@ -416,6 +543,37 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if codexEnabled { triggerCodexFetch() }
     }
 
+    private func setAntigravityEnabled(_ enabled: Bool) {
+        antigravityEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "antigravityEnabled")
+        UserDefaults.standard.set(true, forKey: "providerWelcomeShown")
+        updateAuthVisibility()
+        updateIcon()
+    }
+
+    @objc private func toggleAntigravity() {
+        setAntigravityEnabled(!antigravityEnabled)
+        if antigravityEnabled { triggerAntigravityFetch() }
+    }
+
+    @objc private func toggleIconClaude() {
+        iconShowsClaude.toggle()
+        UserDefaults.standard.set(iconShowsClaude, forKey: "iconShowsClaude")
+        updateAuthVisibility(); updateIcon()
+    }
+
+    @objc private func toggleIconCodex() {
+        iconShowsCodex.toggle()
+        UserDefaults.standard.set(iconShowsCodex, forKey: "iconShowsCodex")
+        updateAuthVisibility(); updateIcon()
+    }
+
+    @objc private func toggleIconAntigravity() {
+        iconShowsAntigravity.toggle()
+        UserDefaults.standard.set(iconShowsAntigravity, forKey: "iconShowsAntigravity")
+        updateAuthVisibility(); updateIcon()
+    }
+
     @objc private func showProviderWelcome() { showWelcome() }
 
     private func showError(provider: String, message: String, fetchedAt: TimeInterval, retry: () -> Void) {
@@ -441,9 +599,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else { triggerCodexFetch() }
     }
 
-    @objc private func refreshClicked() { triggerFetch(isBackground: false); triggerCodexFetch() }
+    @objc private func antigravityStatusClicked() {
+        if let error = antigravityError {
+            showError(provider: "Antigravity", message: error, fetchedAt: antigravityUsage?.fetchedAt ?? 0) { triggerAntigravityFetch() }
+        } else { triggerAntigravityFetch() }
+    }
 
-    @objc private func wakeRefresh() { triggerFetch(isBackground: true); triggerCodexFetch() }
+    @objc private func refreshClicked() { triggerFetch(isBackground: false); triggerCodexFetch(); triggerAntigravityFetch() }
+
+    @objc private func wakeRefresh() { triggerFetch(isBackground: true); triggerCodexFetch(); triggerAntigravityFetch() }
 
     private func showWelcome() {
         welcomeWindow?.close()
@@ -453,6 +617,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }, onCodex: { [weak self] in
             self?.setCodexEnabled(true)
             self?.triggerCodexFetch()
+        }, onAntigravity: { [weak self] in
+            self?.setAntigravityEnabled(true)
+            self?.triggerAntigravityFetch()
         })
         welcomeWindow?.show()
     }

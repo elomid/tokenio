@@ -4,15 +4,17 @@ class WelcomeWindow {
     private var window: NSWindow?
     private var onLogin: (() -> Void)?
     private var onCodex: (() -> Void)?
+    private var onAntigravity: (() -> Void)?
 
-    init(onLogin: @escaping () -> Void, onCodex: @escaping () -> Void) {
+    init(onLogin: @escaping () -> Void, onCodex: @escaping () -> Void, onAntigravity: @escaping () -> Void) {
         self.onCodex = onCodex
+        self.onAntigravity = onAntigravity
         self.onLogin = onLogin
     }
 
     func show() {
         let w: CGFloat = 320
-        let h: CGFloat = 410
+        let h: CGFloat = 470
 
         let content = NSView(frame: NSRect(x: 0, y: 0, width: w, height: h))
 
@@ -31,7 +33,7 @@ class WelcomeWindow {
         content.addSubview(title)
 
         // Subtitle
-        let subtitle = NSTextField(labelWithString: "Track Claude, Codex, or both\nright from the menu bar.")
+        let subtitle = NSTextField(labelWithString: "Track Claude, Codex, and Antigravity\nright from the menu bar.")
         subtitle.font = .systemFont(ofSize: 13)
         subtitle.textColor = .secondaryLabelColor
         subtitle.alignment = .center
@@ -40,7 +42,7 @@ class WelcomeWindow {
         content.addSubview(subtitle)
 
         // Hint
-        let hint = NSTextField(labelWithString: "Choose either provider to start.\nChange this anytime in Providers.")
+        let hint = NSTextField(labelWithString: "Choose any provider to start.\nChange this anytime in Providers.")
         hint.font = .systemFont(ofSize: 11)
         hint.textColor = .tertiaryLabelColor
         hint.alignment = .center
@@ -67,6 +69,17 @@ class WelcomeWindow {
         codexHint.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(codexHint)
 
+        let antigravityButton = NSButton(title: "Use Antigravity", target: self, action: #selector(antigravityClicked))
+        antigravityButton.bezelStyle = .rounded
+        antigravityButton.controlSize = .large
+        antigravityButton.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(antigravityButton)
+        let antigravityHint = NSTextField(labelWithString: "Uses your existing Antigravity CLI login.")
+        antigravityHint.font = .systemFont(ofSize: 11)
+        antigravityHint.textColor = .secondaryLabelColor
+        antigravityHint.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(antigravityHint)
+
         NSLayoutConstraint.activate([
             icon.centerXAnchor.constraint(equalTo: content.centerXAnchor),
             icon.topAnchor.constraint(equalTo: content.topAnchor, constant: 36),
@@ -89,7 +102,12 @@ class WelcomeWindow {
             codexButton.widthAnchor.constraint(equalToConstant: 180),
             codexHint.centerXAnchor.constraint(equalTo: content.centerXAnchor),
             codexHint.topAnchor.constraint(equalTo: codexButton.bottomAnchor, constant: 6),
-            hint.topAnchor.constraint(equalTo: codexHint.bottomAnchor, constant: 20),
+            antigravityButton.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+            antigravityButton.topAnchor.constraint(equalTo: codexHint.bottomAnchor, constant: 12),
+            antigravityButton.widthAnchor.constraint(equalToConstant: 180),
+            antigravityHint.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+            antigravityHint.topAnchor.constraint(equalTo: antigravityButton.bottomAnchor, constant: 6),
+            hint.topAnchor.constraint(equalTo: antigravityHint.bottomAnchor, constant: 20),
         ])
 
         let win = NSWindow(
@@ -123,6 +141,11 @@ class WelcomeWindow {
     @objc private func codexClicked() {
         close()
         onCodex?()
+    }
+
+    @objc private func antigravityClicked() {
+        close()
+        onAntigravity?()
     }
 
     func close() {
